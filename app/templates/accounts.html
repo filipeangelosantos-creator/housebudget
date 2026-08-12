@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Accounts{% endblock %}
+{% block content %}
+
+<h1>Accounts</h1>
+<p class="small muted">One entry per real bank account or card you'll import statements from.</p>
+
+<div class="card">
+  {% for a in rows %}
+  <div class="txn">
+    <form method="post" action="/accounts/{{ a.id }}/update" class="mid form-row" style="gap:6px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="text" name="name" value="{{ a.name }}" style="min-width:0">
+      <button class="btn small ghost" type="submit" name="action" value="rename" style="flex:0 0 auto">Rename</button>
+    </form>
+    <div class="small muted" style="flex-shrink:0">
+      <span class="chip">{{ a.type }}</span> {{ a.txn_count }} txns
+      {% if a.last_txn %}· to {{ a.last_txn }}{% endif %}
+      {% if a.archived %}· <span class="chip">archived</span>{% endif %}
+    </div>
+    <form method="post" action="/accounts/{{ a.id }}/update" style="flex-shrink:0">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn small ghost" type="submit" name="action" value="toggle_archived">{{ 'Restore' if a.archived else 'Archive' }}</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="muted">No accounts yet — add your checking account and credit card below,
+  or create them on the fly when importing.</p>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>Add account</h2>
+  <form method="post" action="/accounts/add" class="form-row">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="text" name="name" placeholder="e.g. Joint checking" required>
+    <select name="type" style="flex:0 0 140px">
+      <option value="checking">Checking</option>
+      <option value="credit">Credit card</option>
+      <option value="savings">Savings</option>
+      <option value="cash">Cash</option>
+      <option value="other">Other</option>
+    </select>
+    <button class="btn small ghost" type="submit" style="flex:0 0 auto">Add</button>
+  </form>
+</div>
+
+{% endblock %}

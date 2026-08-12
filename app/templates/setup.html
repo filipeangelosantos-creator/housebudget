@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welcome · HouseBudget</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/favicon.ico">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="logo">🏡</div>
+  <h1>Welcome to HouseBudget</h1>
+  <p class="muted" style="text-align:center">Create your accounts — this only happens once.</p>
+  {% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+  <form method="post" action="/setup" class="card">
+    <h2>You</h2>
+    <label class="f">Username</label>
+    <input type="text" name="username" autocomplete="username" required>
+    <label class="f">Name shown in the app (optional)</label>
+    <input type="text" name="display_name">
+    <label class="f">Password (8+ characters)</label>
+    <input type="password" name="password" autocomplete="new-password" required>
+    <label class="f">Repeat password</label>
+    <input type="password" name="password2" autocomplete="new-password" required>
+
+    <h2 style="margin-top:18px">Your partner (optional)</h2>
+    <p class="small muted">You can also add them later in Settings.</p>
+    <label class="f">Partner username</label>
+    <input type="text" name="username_p">
+    <label class="f">Partner name (optional)</label>
+    <input type="text" name="display_name_p">
+    <label class="f">Partner password (8+ characters)</label>
+    <input type="password" name="password_p">
+
+    <div class="actions"><button class="btn" type="submit">Create &amp; start</button></div>
+  </form>
+</div>
+</body>
+</html>

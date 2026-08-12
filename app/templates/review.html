@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, category_select with context %}
+{% block title %}Review{% endblock %}
+{% block content %}
+
+<h1>Review queue</h1>
+{% if total == 0 %}
+<div class="card"><p style="margin:4px 0">🎉 All transactions are categorized.</p>
+<p class="small muted">New imports land here whenever the auto-classifier isn't sure.</p></div>
+{% else %}
+<p class="small muted">{{ total }} uncategorized transaction{{ 's' if total != 1 }}.
+Pick a category — with “remember” checked, similar transactions are matched automatically from now on.
+<a href="/rules">Manage rules</a></p>
+
+{% for t in rows %}
+<div class="card">
+  <div class="spread">
+    <div>
+      <div style="font-size:15px">{{ t.description }}</div>
+      <div class="small muted">{{ t.date }} · {{ t.account_name }}</div>
+    </div>
+    <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+  </div>
+  <form method="post" action="/review/{{ t.id }}" style="margin-top:8px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="pattern" value="{{ suggestions[t.id] }}">
+    <div class="form-row">
+      {{ category_select('category_id', categories, autosubmit=False) }}
+      <button class="btn" type="submit" style="flex:0 0 auto">Save</button>
+    </div>
+    <label class="check"><input type="checkbox" name="remember" value="1" checked>
+      <span class="small">Remember: always file “<strong>{{ suggestions[t.id] }}</strong>” here</span></label>
+  </form>
+</div>
+{% endfor %}
+{% if total > rows|length %}
+<p class="small muted">Showing the latest {{ rows|length }} — save these and more will appear.</p>
+{% endif %}
+{% endif %}
+
+{% endblock %}

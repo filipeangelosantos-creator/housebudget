@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, category_select with context %}
+{% block title %}Transaction{% endblock %}
+{% block content %}
+
+<p><a href="{{ back }}">‹ Back</a></p>
+<div class="card">
+  <div class="spread">
+    <div>
+      <div style="font-size:16px; font-weight:600">{{ txn.description }}</div>
+      <div class="small muted">{{ txn.date }} · {{ txn.account_name }}{% if txn.manual %} · manual entry{% endif %}</div>
+    </div>
+    <div class="amt {{ 'pos' if txn.amount_cents > 0 }}" style="font-size:17px">{{ amount(txn.amount_cents) }}</div>
+  </div>
+
+  <form method="post" action="/transactions/{{ txn.id }}">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <label class="f">Category</label>
+    {{ category_select('category_id', categories, selected=txn.category_id) }}
+
+    <label class="check"><input type="checkbox" name="remember" value="1">
+      <span class="small">Always use this category when the description contains:</span></label>
+    <input type="text" name="pattern" value="{{ suggested_pattern }}">
+    {% if similar_uncat > 0 %}
+    <p class="small muted">{{ similar_uncat }} other uncategorized transaction{{ 's' if similar_uncat != 1 }} from this merchant will be filed too.</p>
+    {% endif %}
+
+    <label class="f">Notes</label>
+    <textarea name="notes" rows="2">{{ txn.notes }}</textarea>
+
+    <div class="actions">
+      <button class="btn" type="submit">Save</button>
+    </div>
+  </form>
+  <form method="post" action="/transactions/{{ txn.id }}" data-confirm="Delete this transaction?" style="margin-top:10px">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="{{ back }}">
+    <input type="hidden" name="delete" value="1">
+    <button class="btn danger block" type="submit">Delete transaction</button>
+  </form>
+</div>
+
+{% endblock %}

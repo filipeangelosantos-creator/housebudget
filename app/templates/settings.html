@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+
+<h1>Settings</h1>
+{% if message %}<div class="msg-box">{{ message }}</div>{% endif %}
+
+<div class="card">
+  <h2>Shortcuts</h2>
+  <div class="stack-gap">
+    <a href="/review">⚠️ Review uncategorized</a>
+    <a href="/rules">🏷️ Classification rules</a>
+    <a href="/categories">🗂️ Categories &amp; groups</a>
+    <a href="/accounts">🏦 Accounts</a>
+    <a href="/imports">📥 Import history &amp; undo</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Household</h2>
+  <form method="post" action="/settings/save">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="form-row">
+      <div>
+        <label class="f">Name</label>
+        <input type="text" name="household" value="{{ household }}">
+      </div>
+      <div style="flex:0 0 110px">
+        <label class="f">Currency</label>
+        <input type="text" name="currency" value="{{ currency }}">
+      </div>
+    </div>
+    <div class="actions"><button class="btn ghost" type="submit">Save</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Who can sign in</h2>
+  {% for u in users %}
+  <div class="txn"><div class="mid"><div class="desc">{{ u.display_name }}</div>
+    <div class="meta">@{{ u.username }}{% if u.id == me.id %} · that's you{% endif %}</div></div></div>
+  {% endfor %}
+  <details class="adv">
+    <summary>Add a login (e.g. your partner)</summary>
+    <form method="post" action="/settings/adduser">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="f">Username</label>
+      <input type="text" name="username" required>
+      <label class="f">Display name</label>
+      <input type="text" name="display_name">
+      <label class="f">Password (8+ characters)</label>
+      <input type="password" name="password" autocomplete="new-password" required>
+      <div class="actions"><button class="btn ghost" type="submit">Add user</button></div>
+    </form>
+  </details>
+</div>
+
+<div class="card">
+  <h2>Change my password</h2>
+  <form method="post" action="/settings/password">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="f">Current password</label>
+    <input type="password" name="current" autocomplete="current-password" required>
+    <div class="form-row">
+      <div>
+        <label class="f">New password</label>
+        <input type="password" name="password" autocomplete="new-password" required>
+      </div>
+      <div>
+        <label class="f">Repeat</label>
+        <input type="password" name="password2" autocomplete="new-password" required>
+      </div>
+    </div>
+    <div class="actions"><button class="btn ghost" type="submit">Change password</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Your data</h2>
+  <div class="stack-gap">
+    <a href="/export.csv">⬇️ Export all transactions (CSV)</a>
+    <a href="/backup.db">💾 Download database backup</a>
+  </div>
+  <p class="small muted">Everything lives in a single SQLite file on your server.
+  Keep an occasional backup somewhere safe.</p>
+</div>
+
+<form method="post" action="/logout">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <button class="btn ghost block" type="submit">Sign out</button>
+</form>
+
+{% endblock %}

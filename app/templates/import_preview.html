@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount with context %}
+{% block title %}Preview import{% endblock %}
+{% block content %}
+
+<h1>Check before importing</h1>
+<p class="small muted">{{ filename }} → <strong>{{ account.name }}</strong></p>
+
+{% if saved_profile %}
+<div class="banner"><div class="grow">Recognized this bank's format from a previous import.</div></div>
+{% endif %}
+{% if suggest_flip %}
+<div class="banner warn"><div class="grow">Most amounts in this credit-card file are positive —
+if charges should count as spending, tick “flip signs” in the column mapping
+below and refresh the preview.</div></div>
+{% endif %}
+
+<div class="card">
+  <h2>What will happen</h2>
+  <table class="tbl">
+    <tr><td>New transactions</td><td class="num"><strong>{{ stats.ok - stats.duplicates }}</strong></td></tr>
+    <tr><td>Already imported (skipped)</td><td class="num">{{ stats.duplicates }}</td></tr>
+    {% if stats.failed %}<tr><td>Rows that couldn't be read</td><td class="num">{{ stats.failed }}</td></tr>{% endif %}
+    <tr><td>Auto-categorized</td><td class="num">{{ stats.would_categorize }} of {{ stats.ok }}</td></tr>
+    {% if stats.date_min %}<tr><td>Date range</td><td class="num">{{ stats.date_min }} → {{ stats.date_max }}</td></tr>{% endif %}
+  </table>
+</div>
+
+<form method="post" action="/import/commit">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="token" value="{{ token }}">
+
+  {% if kind == 'table' %}
+  <input type="hidden" name="header_row" value="{{ mapping.header_row if mapping.header_row is not none else '' }}">
+  <details class="adv" {% if stats.ok == 0 or stats.failed > stats.ok or suggest_flip %}open{% endif %}>
+    <summary>Column mapping (change if the preview looks wrong)</summary>
+    <div class="card">
+      <label class="f">Date column</label>
+      <select name="date_col">
+        {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if c.index == mapping.date_col }}>{{ c.label }}</option>{% endfor %}
+      </select>
+      <label class="f">Description column</label>
+      <select name="desc_col1">
+        {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if mapping.desc_cols and c.index == mapping.desc_cols[0] }}>{{ c.label }}</option>{% endfor %}
+      </select>
+      <label class="f">Second description column (optional)</label>
+      <select name="desc_col2">
+        <option value="">— none —</option>
+        {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if mapping.desc_cols|length > 1 and c.index == mapping.desc_cols[1] }}>{{ c.label }}</option>{% endfor %}
+      </select>
+
+      {% set split = mapping.debit_col is not none or mapping.credit_col is not none %}
+      <label class="f">Amount layout</label>
+      <div class="seg">
+        <label><input type="radio" name="amount_mode" value="single" {{ 'checked' if not split }}><span>One amount column</span></label>
+        <label><input type="radio" name="amount_mode" value="split" {{ 'checked' if split }}><span>Debit / credit columns</span></label>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="f">Amount column</label>
+          <select name="amount_col">
+            <option value="">—</option>
+            {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if c.index == mapping.amount_col }}>{{ c.label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label class="f">Debit (money out)</label>
+          <select name="debit_col">
+            <option value="">—</option>
+            {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if c.index == mapping.debit_col }}>{{ c.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label class="f">Credit (money in)</label>
+          <select name="credit_col">
+            <option value="">—</option>
+            {% for c in columns %}<option value="{{ c.index }}" {{ 'selected' if c.index == mapping.credit_col }}>{{ c.label }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+
+      <label class="check"><input type="checkbox" name="dayfirst" value="1" {{ 'checked' if mapping.dayfirst }}>
+        <span>Dates are day-first (31/12/2026)</span></label>
+      <label class="check"><input type="checkbox" name="flip_sign" value="1" {{ 'checked' if mapping.flip_sign }}>
+        <span>Flip signs (needed when charges appear as positive numbers)</span></label>
+
+      <button class="btn ghost" type="submit" name="action" value="refresh">Refresh preview</button>
+    </div>
+  </details>
+  {% endif %}
+
+  <div class="card">
+    <h2>Preview ({{ sample|length }} of {{ stats.ok }})</h2>
+    <div class="tbl-scroll">
+      <table class="tbl">
+        <tr><th>Date</th><th>Description</th><th class="num">Amount</th></tr>
+        {% for r in sample %}
+        <tr>
+          <td style="white-space:nowrap">{{ r.date }}</td>
+          <td>{{ r.description[:60] }}</td>
+          <td class="num {{ 'pos' if r.amount_cents > 0 }}">{{ amount(r.amount_cents) }}</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+    {% if errors %}
+    <p class="small muted" style="margin-bottom:2px">Rows that couldn't be read:</p>
+    {% for r in errors %}<p class="small muted" style="margin:2px 0">· {{ r.raw|join(' | ')|truncate(90) }}</p>{% endfor %}
+    {% endif %}
+  </div>
+
+  <div class="actions">
+    <a class="btn ghost" href="/import">Cancel</a>
+    <button class="btn" type="submit" name="action" value="confirm"
+      {% if stats.ok - stats.duplicates == 0 %}disabled{% endif %}>
+      Import {{ stats.ok - stats.duplicates }} transaction{{ 's' if stats.ok - stats.duplicates != 1 }}</button>
+  </div>
+</form>
+
+{% endblock %}

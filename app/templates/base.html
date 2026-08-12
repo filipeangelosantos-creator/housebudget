@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#fcfcfb" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1a1a19" media="(prefers-color-scheme: dark)">
+<title>{% block title %}HouseBudget{% endblock %} · {{ household }}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏡</text></svg>">
+<script src="/static/app.js" defer></script>
+</head>
+<body>
+{% macro icon(name) -%}
+<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if name == 'home' -%}
+<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V20a1 1 0 0 0 1 1h11a1 1 0 0 0 1-1V9.5"/>
+{%- elif name == 'list' -%}
+<path d="M8 6h12M8 12h12M8 18h12"/><path d="M4 6h.01M4 12h.01M4 18h.01"/>
+{%- elif name == 'upload' -%}
+<path d="M12 15V4"/><path d="m7 8 5-4 5 4"/><path d="M4 20h16"/>
+{%- elif name == 'budget' -%}
+<circle cx="12" cy="12" r="9"/><path d="M12 3v9l6.5 3.5"/>
+{%- elif name == 'chart' -%}
+<path d="M5 20v-7M12 20V5M19 20v-10"/>
+{%- elif name == 'gear' -%}
+<path d="M4 7h16M4 12h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="var(--surface)"/><circle cx="15" cy="12" r="2" fill="var(--surface)"/><circle cx="7" cy="17" r="2" fill="var(--surface)"/>
+{%- endif -%}
+</svg>
+{%- endmacro %}
+<header class="topbar">
+  <a class="brand" href="/">🏡 {{ household }}</a>
+  <div class="top-actions">
+    <a href="/settings" aria-label="Settings">{{ icon('gear') }}</a>
+  </div>
+</header>
+<nav class="nav">
+  <a href="/" class="{{ 'active' if active == '/' }}">{{ icon('home') }}<span>Home</span></a>
+  <a href="/transactions" class="{{ 'active' if active in ('/transactions', '/review') }}">{{ icon('list') }}<span>Activity</span></a>
+  <a href="/import" class="{{ 'active' if active in ('/import', '/imports') }}">{{ icon('upload') }}<span>Import</span></a>
+  <a href="/budgets" class="{{ 'active' if active in ('/budgets', '/categories') }}">{{ icon('budget') }}<span>Budget</span></a>
+  <a href="/insights" class="{{ 'active' if active == '/insights' }}">{{ icon('chart') }}<span>Insights</span></a>
+</nav>
+<main class="wrap">
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, plain with context %}
+{% block title %}Insights{% endblock %}
+{% block content %}
+
+<div class="month-nav">
+  <a href="/insights?month={{ prev_month }}" aria-label="Previous month">‹</a>
+  <span class="label">Insights · {{ month_label }}</span>
+  <a href="/insights?month={{ next_month }}" aria-label="Next month">›</a>
+</div>
+
+{% for a in alerts %}
+<div class="banner bad">
+  <div class="grow">⚠️ <strong>{{ a.category }}</strong> is {{ a.pct_change }}% above its usual
+  {{ currency }}{{ a.average|money }} — {{ currency }}{{ a.current|money }} so far this month.</div>
+</div>
+{% endfor %}
+
+<div class="card chart-card">
+  <h2>Cashflow — last 12 months</h2>
+  <div class="legend">
+    <span><span class="sw income"></span>Income</span>
+    <span><span class="sw spent"></span>Spending</span>
+  </div>
+  {{ cashflow_svg|safe }}
+  {% if summary.savings_rate is not none %}
+  <p class="small muted">This month you kept {{ summary.savings_rate }}% of income
+  ({{ plain(summary.net) }}).</p>
+  {% endif %}
+</div>
+
+{% if trends %}
+<div class="card chart-card">
+  <h2>Category trends — last 6 months</h2>
+  {% for t in trends %}
+  <div class="trend-row">
+    <span class="name">{{ t.name }}</span>
+    {{ t.svg|safe }}
+    <span class="tot">{{ currency }}{{ t.series[-1]|money }}</span>
+  </div>
+  {% endfor %}
+  <p class="small muted">Bars show monthly spend; the solid bar is {{ month_label }}.</p>
+</div>
+{% endif %}
+
+{% if recurring %}
+<div class="card">
+  <h2>Recurring &amp; subscriptions</h2>
+  {% for r in recurring %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ r.merchant.title() }}</div>
+      <div class="meta">{{ r.category or 'uncategorized' }} · seen {{ r.months_seen }} months · last {{ r.last_date }}</div>
+    </div>
+    <div class="amt">{{ currency }}{{ r.monthly_cents|money }}/mo</div>
+  </div>
+  {% endfor %}
+  <p class="small muted">Total ≈ {{ currency }}{{ (recurring|sum(attribute='monthly_cents'))|money }}/month.
+  Anything here you no longer use is an easy win.</p>
+</div>
+{% endif %}
+
+{% if merchants %}
+<div class="card">
+  <h2>Top merchants this month</h2>
+  {% for m in merchants %}
+  <div class="txn">
+    <div class="mid"><div class="desc">{{ m.merchant.title() }}</div>
+      <div class="meta">{{ m.n }} transaction{{ 's' if m.n != 1 }}</div></div>
+    <div class="amt">{{ currency }}{{ m.spent|money }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if largest %}
+<div class="card">
+  <h2>Largest expenses this month</h2>
+  {% for t in largest %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc"><a href="/transactions/{{ t.id }}?back=/insights">{{ t.description }}</a></div>
+      <div class="meta">{{ t.date }} · {{ t.category or 'uncategorized' }}</div>
+    </div>
+    <div class="amt">{{ amount(t.amount_cents) }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if not merchants and not largest %}
+<div class="card"><p class="muted">No spending data for {{ month_label }} yet —
+<a href="/import">import a statement</a> to see insights.</p></div>
+{% endif %}
+
+{% endblock %}

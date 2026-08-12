@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% from "_macros.html" import plain with context %}
+{% block title %}Budget{% endblock %}
+{% block content %}
+
+<div class="month-nav">
+  <a href="/budgets?month={{ prev_month }}" aria-label="Previous month">‹</a>
+  <span class="label">Budget · {{ month_label }}</span>
+  <a href="/budgets?month={{ next_month }}" aria-label="Next month">›</a>
+</div>
+
+<p class="small muted">Planned income {{ currency }}{{ summary.income_budget|money }} −
+planned spending {{ currency }}{{ summary.expense_budget|money }} =
+<strong class="{{ 'pos' if summary.income_budget - summary.expense_budget >= 0 else 'neg' }}">
+{{ plain(summary.income_budget - summary.expense_budget) }}</strong>
+· <a href="/categories">Edit categories</a></p>
+
+{% if not has_budget and prior_month %}
+<form method="post" action="/budgets/copy">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="month" value="{{ month }}">
+  <input type="hidden" name="from_month" value="{{ prior_month }}">
+  <div class="banner">
+    <div class="grow">No budget for this month yet.</div>
+    <button class="btn small" type="submit">Copy from {{ prior_month }}</button>
+  </div>
+</form>
+{% endif %}
+
+<form method="post" action="/budgets/save">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="month" value="{{ month }}">
+
+  {% for group in summary.groups %}
+  <div class="card">
+    <div class="group-head">
+      <span>{{ group.name }}</span>
+      <span class="sub">{{ currency }}{{ group.budget|money }} planned</span>
+    </div>
+    {% for line in group.lines %}
+    {% if not line.excluded %}
+    <div class="budget-edit-row">
+      <div class="nm">{{ line.name }}
+        <div class="hint">{{ 'received' if group.kind == 'income' else 'spent' }} {{ plain(line.actual) }} this month</div>
+      </div>
+      <input type="text" inputmode="decimal" name="cat_{{ line.id }}"
+             value="{{ line.budget|money_plain }}" placeholder="0">
+    </div>
+    {% endif %}
+    {% endfor %}
+  </div>
+  {% endfor %}
+
+  <div class="actions">
+    <button class="btn" type="submit">Save budget</button>
+  </div>
+</form>
+
+{% endblock %}

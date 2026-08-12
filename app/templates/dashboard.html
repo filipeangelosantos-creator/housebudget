@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, plain with context %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<div class="month-nav">
+  <a href="/?month={{ prev_month }}" aria-label="Previous month">‹</a>
+  <span class="label">{{ month_label }}</span>
+  <a href="/?month={{ next_month }}" aria-label="Next month">›</a>
+</div>
+
+{% if not has_any_txn %}
+<div class="card">
+  <h2>Get started</h2>
+  <ol style="margin:8px 0 4px; padding-left:20px; line-height:1.9">
+    <li><a href="/import">Upload a bank or credit-card statement</a> (CSV, Excel or OFX export from your bank)</li>
+    <li>Review anything the auto-classifier couldn't place</li>
+    <li><a href="/budgets">Set your monthly budget</a> per category</li>
+    <li>Add your partner's login in <a href="/settings">Settings</a></li>
+  </ol>
+</div>
+{% endif %}
+
+<div class="tiles">
+  <div class="tile"><div class="k">Income</div>
+    <div class="v pos">{{ currency }}{{ summary.income_actual|money }}</div></div>
+  <div class="tile"><div class="k">Spent</div>
+    <div class="v">{{ currency }}{{ summary.expense_actual|money }}</div></div>
+  <div class="tile"><div class="k">Net</div>
+    <div class="v {{ 'pos' if summary.net >= 0 else 'neg' }}">{{ plain(summary.net) }}</div></div>
+</div>
+{% if summary.savings_rate is not none %}
+<p class="small muted" style="margin-top:-6px">You kept {{ summary.savings_rate }}% of this month's income.</p>
+{% endif %}
+
+{% if summary.uncategorized_count > 0 %}
+<a href="/review" style="text-decoration:none">
+  <div class="banner warn">
+    <div class="grow"><strong>{{ summary.uncategorized_count }} transaction{{ 's' if summary.uncategorized_count != 1 }}</strong> this month need{{ '' if summary.uncategorized_count != 1 else 's' }} a category ({{ currency }}{{ summary.uncategorized_amount|money }})</div>
+    <span>Review ›</span>
+  </div>
+</a>
+{% elif total_uncat > 0 %}
+<a href="/review" style="text-decoration:none">
+  <div class="banner warn"><div class="grow"><strong>{{ total_uncat }}</strong> older transaction{{ 's' if total_uncat != 1 }} still uncategorized</div><span>Review ›</span></div>
+</a>
+{% endif %}
+
+{% for a in alerts %}
+<div class="banner bad">
+  <div class="grow">⚠️ <strong>{{ a.category }}</strong> is {{ a.pct_change }}% above its 3-month average
+    ({{ currency }}{{ a.current|money }} vs usual {{ currency }}{{ a.average|money }})</div>
+</div>
+{% endfor %}
+
+{% if has_any_txn and not has_budget %}
+<div class="banner">
+  <div class="grow">No budget set for {{ month_label }} yet.</div>
+  <a class="btn small" href="/budgets?month={{ month }}">Set budget</a>
+</div>
+{% endif %}
+
+{% for group in summary.groups %}
+{% if group.lines %}
+<div class="card">
+  <div class="group-head">
+    <span>{{ group.name }}</span>
+    <span class="sub">{{ plain(group.actual) }}{% if group.budget > 0 %} / {{ currency }}{{ group.budget|money }}{% endif %}</span>
+  </div>
+  {% for line in group.lines %}
+  <div class="bar-row">
+    <div class="line1">
+      <span>{{ line.name }}{% if line.excluded %} <span class="chip">not counted</span>{% endif %}</span>
+      <span class="amounts">
+        {{ plain(line.actual) }}{% if line.budget > 0 %} / {{ currency }}{{ line.budget|money }}{% endif %}
+        {% if group.kind != 'income' and line.budget > 0 and line.actual > line.budget %}
+          <span class="over-note">+{{ currency }}{{ (line.actual - line.budget)|money }}</span>
+        {% endif %}
+      </span>
+    </div>
+    {% if line.budget > 0 and not line.excluded %}
+    {% set pct = line.pct if line.pct <= 100 else 100 %}
+    {% if group.kind == 'income' %}
+    <div class="track"><div class="fill {{ 'ok' if line.pct >= 100 }}" style="width: {{ pct }}%"></div></div>
+    {% else %}
+    <div class="track"><div class="fill {{ 'over' if line.actual > line.budget else ('warn' if line.pct >= 85 else 'ok') }}" style="width: {{ pct }}%"></div></div>
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+{% endfor %}
+
+{% if recent %}
+<div class="card">
+  <h2>Latest activity <a class="h2-link" href="/transactions">all ›</a></h2>
+  {% for t in recent %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc"><a href="/transactions/{{ t.id }}">{{ t.description }}</a></div>
+      <div class="meta">{{ t.date }} · {{ t.category or 'uncategorized' }}</div>
+    </div>
+    <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

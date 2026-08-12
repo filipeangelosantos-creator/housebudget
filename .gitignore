@@ -1,0 +1,19 @@
+# Runtime data (database, uploaded statements, secret key)
+data/
+*.db
+*.sqlite3
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+
+# Local env
+.env
+
+# Editors
+.vscode/
+.idea/
+.DS_Store

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Imported{% endblock %}
+{% block content %}
+
+<h1>Import complete</h1>
+<div class="card">
+  <table class="tbl">
+    <tr><td>Added</td><td class="num"><strong>{{ result.added }}</strong></td></tr>
+    <tr><td>Auto-categorized</td><td class="num">{{ result.categorized }}</td></tr>
+    <tr><td>Duplicates skipped</td><td class="num">{{ result.duplicates }}</td></tr>
+    {% if result.failed %}<tr><td>Unreadable rows</td><td class="num">{{ result.failed }}</td></tr>{% endif %}
+  </table>
+</div>
+
+{% if uncat > 0 %}
+<a class="btn block" href="/review">Review {{ uncat }} uncategorized ›</a>
+<p></p>
+{% endif %}
+<div class="actions">
+  <a class="btn ghost" href="/import">Import another</a>
+  <a class="btn ghost" href="/">Dashboard</a>
+</div>
+
+{% endblock %}

@@ -1,0 +1,114 @@
+"""Budget editor per month + category management."""
+from fastapi import APIRouter, Depends, Form, Request
+from fastapi.responses import RedirectResponse
+
+from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
+from ..services import budgets
+from .dashboard import clean_month
+
+router = APIRouter()
+
+
+@router.get("/budgets")
+def budgets_page(request: Request, conn=Depends(get_conn),
+                 user=Depends(current_user), month: str | None = None):
+    m = clean_month(month)
+    summary = budgets.month_summary(conn, m, include_empty=True)
+    has_budget = any(l.budget for g in summary.groups for l in g.lines)
+    prior = budgets.latest_budget_month_before(conn, m)
+    return render(request, conn, "budgets.html",
+                  month=m, month_label=budgets.month_label(m),
+                  prev_month=budgets.shift_month(m, -1),
+                  next_month=budgets.shift_month(m, 1),
+                  summary=summary, has_budget=has_budget, prior_month=prior)
+
+
+@router.post("/budgets/save", dependencies=[Depends(verify_csrf)])
+async def budgets_save(request: Request, conn=Depends(get_conn),
+                       user=Depends(current_user)):
+    form = await request.form()
+    m = clean_month(str(form.get("month", "")))
+    for key, value in form.items():
+        if key.startswith("cat_"):
+            cat_id = key[4:]
+            if cat_id.isdigit():
+                budgets.set_budget(conn, int(cat_id), m,
+                                   abs(parse_money_input(str(value))))
+    conn.commit()
+    return RedirectResponse(f"/budgets?month={m}", status_code=303)
+
+
+@router.post("/budgets/copy", dependencies=[Depends(verify_csrf)])
+def budgets_copy(request: Request, conn=Depends(get_conn),
+                 user=Depends(current_user), month: str = Form(...),
+                 from_month: str = Form(...)):
+    budgets.copy_budgets(conn, clean_month(from_month), clean_month(month))
+    return RedirectResponse(f"/budgets?month={clean_month(month)}", status_code=303)
+
+
+# --- categories --------------------------------------------------------------
+
+@router.get("/categories")
+def categories_page(request: Request, conn=Depends(get_conn),
+                    user=Depends(current_user)):
+    groups = conn.execute(
+        "SELECT * FROM category_groups ORDER BY sort_order, id").fetchall()
+    cats = conn.execute(
+        "SELECT c.*, (SELECT COUNT(*) FROM transactions t WHERE t.category_id = c.id) "
+        "AS txn_count FROM categories c ORDER BY c.sort_order, c.id").fetchall()
+    by_group: dict[int, list] = {}
+    for c in cats:
+        by_group.setdefault(c["group_id"], []).append(c)
+    return render(request, conn, "categories.html", groups=groups, by_group=by_group)
+
+
+@router.post("/categories/add", dependencies=[Depends(verify_csrf)])
+def category_add(request: Request, conn=Depends(get_conn),
+                 user=Depends(current_user), group_id: int = Form(...),
+                 name: str = Form(...)):
+    if name.strip():
+        order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM categories WHERE group_id = ?",
+            (group_id,)).fetchone()[0]
+        conn.execute(
+            "INSERT INTO categories (group_id, name, sort_order) VALUES (?, ?, ?)",
+            (group_id, name.strip(), order))
+        conn.commit()
+    return RedirectResponse("/categories", status_code=303)
+
+
+@router.post("/categories/{cat_id}/update", dependencies=[Depends(verify_csrf)])
+def category_update(cat_id: int, request: Request, conn=Depends(get_conn),
+                    user=Depends(current_user), name: str = Form(""),
+                    action: str = Form("rename")):
+    if action == "rename" and name.strip():
+        conn.execute("UPDATE categories SET name = ? WHERE id = ?",
+                     (name.strip(), cat_id))
+    elif action == "toggle_excluded":
+        conn.execute("UPDATE categories SET excluded = 1 - excluded WHERE id = ?",
+                     (cat_id,))
+    elif action == "toggle_archived":
+        conn.execute("UPDATE categories SET archived = 1 - archived WHERE id = ?",
+                     (cat_id,))
+    elif action == "delete":
+        used = conn.execute("SELECT COUNT(*) FROM transactions WHERE category_id = ?",
+                            (cat_id,)).fetchone()[0]
+        if used == 0:
+            conn.execute("DELETE FROM rules WHERE category_id = ?", (cat_id,))
+            conn.execute("DELETE FROM budgets WHERE category_id = ?", (cat_id,))
+            conn.execute("DELETE FROM categories WHERE id = ?", (cat_id,))
+    conn.commit()
+    return RedirectResponse("/categories", status_code=303)
+
+
+@router.post("/groups/add", dependencies=[Depends(verify_csrf)])
+def group_add(request: Request, conn=Depends(get_conn), user=Depends(current_user),
+              name: str = Form(...), kind: str = Form("expense")):
+    if name.strip():
+        order = conn.execute(
+            "SELECT COALESCE(MAX(sort_order), 0) + 1 FROM category_groups").fetchone()[0]
+        conn.execute(
+            "INSERT INTO category_groups (name, kind, sort_order) VALUES (?, ?, ?)",
+            (name.strip(), kind if kind in ("income", "expense") else "expense", order))
+        conn.commit()
+    return RedirectResponse("/categories", status_code=303)

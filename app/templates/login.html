@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · HouseBudget</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/favicon.ico">
+</head>
+<body>
+<div class="auth-wrap">
+  <div class="logo">🏡</div>
+  <h1>HouseBudget</h1>
+  {% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+  <form method="post" action="/login" class="card">
+    <input type="hidden" name="next" value="{{ next }}">
+    <label class="f" for="u">Username</label>
+    <input type="text" id="u" name="username" autocomplete="username" autofocus required>
+    <label class="f" for="p">Password</label>
+    <input type="password" id="p" name="password" autocomplete="current-password" required>
+    <div class="actions"><button class="btn" type="submit">Sign in</button></div>
+  </form>
+  <p class="footer-note">Private &amp; self-hosted — your data stays on your server.</p>
+</div>
+</body>
+</html>

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select with context %}
+{% block title %}Add transaction{% endblock %}
+{% block content %}
+
+<h1>Add transaction</h1>
+<p class="small muted">For cash spending, paystub income or anything not on a statement.</p>
+
+<div class="card">
+  <form method="post" action="/transactions/new">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+
+    <div class="seg" role="radiogroup" aria-label="Type">
+      <label><input type="radio" name="direction" value="expense" checked><span>Expense</span></label>
+      <label><input type="radio" name="direction" value="income"><span>Income</span></label>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label class="f">Date</label>
+        <input type="date" name="txn_date" value="{{ today }}" required>
+      </div>
+      <div>
+        <label class="f">Amount ({{ currency }})</label>
+        <input type="text" name="amount" inputmode="decimal" placeholder="0.00" required>
+      </div>
+    </div>
+
+    <label class="f">Description</label>
+    <input type="text" name="description" placeholder="e.g. Farmers market / August paycheck" required>
+
+    <label class="f">Account</label>
+    <select name="account_id" required>
+      {% for a in accounts %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+    </select>
+    {% if not accounts %}
+    <p class="small muted">No accounts yet — <a href="/accounts">create one first</a>.</p>
+    {% endif %}
+
+    <label class="f">Category</label>
+    {{ category_select('category_id', categories) }}
+
+    <label class="f">Notes (optional)</label>
+    <input type="text" name="notes">
+
+    <div class="actions"><button class="btn" type="submit" {% if not accounts %}disabled{% endif %}>Add</button></div>
+  </form>
+</div>
+
+{% endblock %}

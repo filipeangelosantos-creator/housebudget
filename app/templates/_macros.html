@@ -1,0 +1,22 @@
+{% macro amount(cents) -%}
+{%- if cents < 0 -%}−{{ currency }}{{ cents|money }}{%- elif cents > 0 -%}+{{ currency }}{{ cents|money }}{%- else -%}{{ currency }}0.00{%- endif -%}
+{%- endmacro %}
+
+{# like amount() but only marks negatives: for totals/budget contexts #}
+{% macro plain(cents) -%}
+{%- if cents < 0 -%}−{{ currency }}{{ cents|money }}{%- else -%}{{ currency }}{{ cents|money }}{%- endif -%}
+{%- endmacro %}
+
+{% macro category_select(name, categories, selected=None, autosubmit=False, include_blank=True) -%}
+<select name="{{ name }}"{% if autosubmit %} data-autosubmit{% endif %}>
+  {% if include_blank %}<option value="">— uncategorized —</option>{% endif %}
+  {%- for c in categories %}
+  {%- if loop.first or c.group_name != loop.previtem.group_name %}
+  {%- if not loop.first %}</optgroup>{% endif %}
+  <optgroup label="{{ c.group_name }}">
+  {%- endif %}
+    <option value="{{ c.id }}"{% if selected == c.id %} selected{% endif %}>{{ c.name }}</option>
+  {%- if loop.last %}</optgroup>{% endif %}
+  {%- endfor %}
+</select>
+{%- endmacro %}

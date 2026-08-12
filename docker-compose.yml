@@ -1,0 +1,36 @@
+# HouseBudget with automatic HTTPS.
+#
+#   1. Point your domain's DNS (an A record) at this server.
+#   2. cp .env.example .env   and set DOMAIN=budget.yourdomain.com
+#   3. docker compose up -d --build
+#
+# Caddy obtains and renews the TLS certificate automatically.
+# All data (database, uploads, secret key) lives in ./data — back it up.
+
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./data:/srv/housebudget/data
+    expose:
+      - "8000"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

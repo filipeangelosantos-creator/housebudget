@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Import history{% endblock %}
+{% block content %}
+
+<h1>Import history</h1>
+<p class="small muted">Deleting an import removes the transactions it created —
+useful if a file was mapped wrong. Re-import the file afterwards.</p>
+
+<div class="card">
+  {% for i in rows %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ i.filename }}</div>
+      <div class="meta">{{ i.created_at[:10] }} · {{ i.account_name }} ·
+        {{ i.num_added }} added, {{ i.num_duplicate }} dup
+        {% if i.uploader %} · by {{ i.uploader }}{% endif %}</div>
+    </div>
+    <form method="post" action="/imports/{{ i.id }}/delete"
+          data-confirm="Delete this import and its {{ i.num_added }} transactions?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn small danger" type="submit">Undo</button>
+    </form>
+  </div>
+  {% else %}
+  <p class="muted">No imports yet.</p>
+  {% endfor %}
+</div>
+
+{% endblock %}
