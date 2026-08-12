@@ -1,14 +1,27 @@
 """Application configuration.
 
-Everything lives under DATA_DIR (default ./data) so a single Docker volume
-holds the database, uploaded statement files and the auto-generated secret key.
+The database, uploaded statements and the cookie-signing key all live under
+DATA_DIR. It deliberately defaults to a directory *outside* the code checkout:
+your financial history should survive deleting, re-cloning or `git clean`-ing
+the source. Set HB_DATA_DIR to put it anywhere else.
 """
 import os
 import secrets
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DATA_DIR = Path(os.environ.get("HB_DATA_DIR", BASE_DIR / "data"))
+LEGACY_DATA_DIR = BASE_DIR / "data"
+
+
+def _default_data_dir() -> Path:
+    # An install that already keeps data in the checkout keeps working; a fresh
+    # one gets the safer location.
+    if LEGACY_DATA_DIR.exists():
+        return LEGACY_DATA_DIR
+    return Path.home() / ".housebudget"
+
+
+DATA_DIR = Path(os.environ.get("HB_DATA_DIR") or _default_data_dir())
 UPLOADS_DIR = DATA_DIR / "uploads"
 PENDING_DIR = UPLOADS_DIR / "pending"
 DB_PATH = Path(os.environ.get("HB_DB_PATH", DATA_DIR / "budget.db"))

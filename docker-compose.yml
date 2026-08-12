@@ -12,7 +12,9 @@ services:
     build: .
     restart: unless-stopped
     volumes:
-      - ./data:/srv/housebudget/data
+      # Data lives outside the checkout on purpose: deleting or re-cloning the
+      # code must never take your financial history with it.
+      - ${HB_DATA_PATH:-/srv/housebudget-data}:/srv/housebudget/data
     expose:
       - "8000"
 
