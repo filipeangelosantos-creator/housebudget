@@ -12,6 +12,10 @@ you own and can back up with one tap.
 |---|---|---|
 | ![Dashboard](docs/screenshots/01-dashboard.png) | ![Insights](docs/screenshots/02-insights.png) | ![Import](docs/screenshots/06b-preview-flipped.png) |
 
+| Review queue — confirm or split | Splitting one receipt |
+|---|---|
+| ![Review](docs/screenshots/03-review.png) | ![Split](docs/screenshots/08-split.png) |
+
 ## What it does
 
 - **Statement import** — CSV, Excel (.xlsx) and OFX/QFX exports from any bank.
@@ -23,7 +27,14 @@ you own and can back up with one tap.
 - **Auto-classification that learns** — a rules engine ships with common
   merchants (groceries, fuel, subscriptions, …). Anything unknown lands in a
   review queue; when you file it, the app offers to remember the merchant so it
-  never asks again. Rules are fully editable.
+  never asks again. It also suggests the category you have used most often for
+  that merchant. Rules are fully editable.
+- **Mixed-basket shops are flagged, not guessed at** — a Costco, Amazon,
+  Walmart or Continente charge over $50 gets the most likely category *and* a
+  request to confirm, because one receipt there is rarely one budget line.
+- **Split a receipt across categories** — that $231.80 Costco run becomes
+  $150 groceries + $81.80 clothing. Each part lands in its own budget category;
+  the totals, merchant list and trends still count the charge once.
 - **No double counting** — transfers between your own accounts and credit-card
   payments are tracked but excluded from budgets and insights.
 - **Budget vs. actuals** — monthly budgets per category (copy last month with
@@ -87,9 +98,11 @@ itself is unchanged.
 1. **Once a month (or whenever)**: download statements from each bank/card
    site (CSV or Excel; OFX is even better) and upload them on the Import tab —
    both of you can do this from your phones.
-2. **Review**: the app tells you how many transactions need a category. Filing
-   one with “remember” checked teaches it the merchant for next time — after a
-   couple of months almost everything classifies itself.
+2. **Review**: the queue has two parts. *Needs a category* is anything the app
+   couldn't place — filing one with “remember” checked teaches it the merchant
+   for next time, so after a couple of months almost everything classifies
+   itself. *Worth a look* is the big-box charges: tap **Confirm** to accept the
+   suggested category, or **Split…** to divide the receipt across categories.
 3. **Check the dashboard**: budget bars, overspend alerts, what's left this
    month. Insights shows trends, subscriptions and where the money went.
 4. **Paystubs**: your net pay appears automatically in the checking-account
@@ -105,6 +118,19 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
 
 ## Roadmap ideas
 
+- **Paystub import** — today your net pay is picked up automatically from the
+  bank statement and filed as Salary, so gross pay and deductions (tax, health
+  insurance, retirement) are not visible. A paystub is one event broken into
+  components rather than a list of events, so importing one means creating a
+  gross entry plus deduction entries and then matching them against the deposit
+  already in your statement, to avoid counting pay twice. A short manual form
+  would be far more reliable than parsing employer PDFs, which vary and change.
+- **Transfer pairing** — transfers between your own accounts and credit-card
+  payments are currently recognized by description text (`TRANSFER`, `PAYMENT
+  THANK YOU`, …) and excluded from budgets on each side independently. Matching
+  the two sides to each other — same amount, opposite sign, a few days apart,
+  two of your accounts — would make this independent of how your bank words
+  things and would surface any transfer where only one side was seen.
 - **Automatic bank sync** — true automatic connections require either your
   bank's official API (open banking, where available) or a third-party
   aggregator (Plaid, GoCardless, …), which conflicts with the
@@ -112,6 +138,11 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
   scheduled import from a folder/email inbox where your bank sends statement
   exports. The statement-import pipeline is built so a sync source can be
   added without changing anything else.
+- **Amazon order detail** — Amazon can export per-item order history, which
+  could be matched to card charges by amount and date to label what was
+  actually bought. Amazon charges per shipment, so one order can be several
+  charges and one charge several items; the matching is fuzzy and would need
+  review. Splitting covers most of this need already.
 - **PDF statements** — banks' PDFs vary wildly; CSV/Excel/OFX exports are more
   reliable. If one of your banks only offers PDF, open an issue with a sample
   layout (redacted!) and a parser can be added for that bank.
@@ -122,8 +153,14 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
 - **Stack**: FastAPI + Jinja2 server-rendered pages, SQLite, no JS framework
   (one small progressive-enhancement script), charts are server-generated SVG.
 - **Layout**: `app/parsing/` (statement formats) · `app/services/` (classify,
-  import/dedupe, budgets, insights, charts) · `app/routes/` + `app/templates/`
-  (pages) · `tests/` (32 tests: parsers, dedupe, rules, budget math, insights,
-  and a full end-to-end journey).
+  import/dedupe, budgets, splits, insights, charts) · `app/routes/` +
+  `app/templates/` (pages) · `tests/` (44 tests: parsers, dedupe, rules, budget
+  math, splitting, insights, schema migration, and a full end-to-end journey).
 - Money is stored as integer cents; expenses negative, income positive.
+- Every money aggregate reads the `txn_allocations` view rather than the
+  `transactions` table, so a split transaction contributes each part to its own
+  category while still counting once as a charge. Uncategorized money is
+  excluded from both the dashboard and Insights and reported separately.
+- The schema is versioned (`PRAGMA user_version`) with migrations in
+  `app/db.py`; existing databases upgrade automatically on startup.
 - Run tests: `.venv/bin/python -m pytest tests/`

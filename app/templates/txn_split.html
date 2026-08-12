@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, category_select with context %}
+{% block title %}Split transaction{% endblock %}
+{% block content %}
+
+<p><a href="{{ back }}">‹ Back</a></p>
+<h1>Split across categories</h1>
+
+<div class="card">
+  <div class="spread">
+    <div>
+      <div style="font-size:15px; font-weight:600">{{ txn.description }}</div>
+      <div class="small muted">{{ txn.date }} · {{ txn.account_name }}</div>
+    </div>
+    <div class="amt" style="font-size:17px">{{ amount(txn.amount_cents) }}</div>
+  </div>
+</div>
+
+{% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+
+{% if history %}
+<p class="small muted">You usually file this merchant as
+  {% for h in history %}<strong>{{ h.name }}</strong> ({{ h.share }}%){{ ', ' if not loop.last }}{% endfor %}.</p>
+{% endif %}
+
+<form method="post" action="/transactions/{{ txn.id }}/split"
+      data-split-total="{{ txn.amount_cents }}">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="back" value="{{ back }}">
+
+  <div class="card">
+    <h2>Parts</h2>
+    {% for i in range(rows_to_show) %}
+    {% set s = splits[i] if i < splits|length else None %}
+    <div class="split-row">
+      {{ category_select('cat_' ~ '%02d'|format(i), categories,
+                         selected=(s.category_id if s else None)) }}
+      <input type="text" inputmode="decimal" name="amt_{{ '%02d'|format(i) }}"
+             class="split-amt" placeholder="0.00"
+             value="{{ (s.amount_cents if s else 0)|money_plain }}"
+             aria-label="Amount for part {{ i + 1 }}">
+    </div>
+    {% endfor %}
+
+    <div class="split-summary">
+      <span>Total of parts</span>
+      <span><strong id="split-sum">—</strong> of {{ currency }}{{ txn.amount_cents|money }}</span>
+    </div>
+    <p class="small muted" id="split-remainder"></p>
+    <p class="small muted">Enter amounts as positive numbers — they must add up to
+      {{ currency }}{{ txn.amount_cents|money }}. Leave a row's amount blank to skip it.</p>
+  </div>
+
+  <div class="actions">
+    <a class="btn ghost" href="{{ back }}">Cancel</a>
+    <button class="btn" type="submit">Save split</button>
+  </div>
+</form>
+
+{% if splits and splits[0].get('id') %}
+<form method="post" action="/transactions/{{ txn.id }}/split"
+      data-confirm="Remove the split and keep one category?" style="margin-top:10px">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="back" value="{{ back }}">
+  <input type="hidden" name="action" value="unsplit">
+  <button class="btn danger block" type="submit">Remove split</button>
+</form>
+{% endif %}
+
+{% endblock %}

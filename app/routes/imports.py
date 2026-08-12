@@ -7,7 +7,7 @@ from ..db import utcnow
 from ..deps import current_user, get_conn, render, verify_csrf
 from ..parsing.csv_parser import Mapping, apply_mapping
 from ..parsing.statements import SUPPORTED_EXTENSIONS, load_statement
-from ..services import importer
+from ..services import importer, splits
 
 router = APIRouter()
 
@@ -162,7 +162,8 @@ async def import_commit(request: Request, conn=Depends(get_conn),
     uncat = conn.execute(
         "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
     return render(request, conn, "import_result.html", result=result,
-                  filename=filename, uncat=uncat)
+                  filename=filename, uncat=uncat,
+                  to_confirm=splits.pending_confirmation_count(conn))
 
 
 @router.get("/imports")

@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from .. import config
 from ..db import utcnow
 from ..parsing.csv_parser import Mapping, ParsedRow
-from . import classify
+from . import classify, splits
 
 
 def dedupe_hashes(account_id: int, rows: list[ParsedRow]) -> list[str | None]:
@@ -84,6 +84,7 @@ class ImportResult:
     duplicates: int
     failed: int
     categorized: int
+    to_confirm: int = 0
 
 
 def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
@@ -99,7 +100,7 @@ def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
         (account_id, filename, hashlib.sha256(file_bytes).hexdigest(), user_id, now))
     import_id = cur.lastrowid
 
-    added = dup = failed = categorized = 0
+    added = dup = failed = categorized = to_confirm = 0
     for row, h in zip(rows, hashes):
         if row.error or h is None:
             failed += 1
@@ -110,16 +111,27 @@ def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
         norm = classify.normalize_desc(row.description)
         mkey = classify.merchant_key(row.description)
         cat = classify.classify(rules, norm, mkey)
+        # Big-box / marketplace charges get a guess plus a request to confirm,
+        # because one receipt there often spans several budget categories.
+        prompt = splits.should_prompt_split(conn, norm, mkey, row.amount_cents)
+        if cat is None and prompt:
+            suggestion = splits.suggest_category(conn, mkey)
+            if suggestion:
+                cat = suggestion["category_id"]
         conn.execute(
             "INSERT INTO transactions (account_id, import_id, date, amount_cents, "
             "description, normalized_desc, merchant_key, category_id, fitid, "
-            "dedupe_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "dedupe_hash, needs_review, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (account_id, import_id, str(row.date), row.amount_cents,
-             str(row.description)[:300], norm[:300], mkey, cat, row.fitid, h, now))
+             str(row.description)[:300], norm[:300], mkey, cat, row.fitid, h,
+             1 if (prompt and cat is not None) else 0, now))
         existing.add(h)
         added += 1
         if cat:
             categorized += 1
+            if prompt:
+                to_confirm += 1
 
     conn.execute(
         "UPDATE imports SET num_added = ?, num_duplicate = ?, num_failed = ? WHERE id = ?",
@@ -129,7 +141,7 @@ def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
     config.ensure_dirs()
     safe_name = "".join(c for c in filename if c.isalnum() or c in "._-")[:80]
     (config.UPLOADS_DIR / f"{import_id}_{safe_name}").write_bytes(file_bytes)
-    return ImportResult(import_id, added, dup, failed, categorized)
+    return ImportResult(import_id, added, dup, failed, categorized, to_confirm)
 
 
 def delete_import(conn, import_id: int) -> int:

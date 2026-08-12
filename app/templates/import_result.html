@@ -8,12 +8,17 @@
     <tr><td>Added</td><td class="num"><strong>{{ result.added }}</strong></td></tr>
     <tr><td>Auto-categorized</td><td class="num">{{ result.categorized }}</td></tr>
     <tr><td>Duplicates skipped</td><td class="num">{{ result.duplicates }}</td></tr>
+    {% if result.to_confirm %}<tr><td>Worth confirming or splitting</td><td class="num">{{ result.to_confirm }}</td></tr>{% endif %}
     {% if result.failed %}<tr><td>Unreadable rows</td><td class="num">{{ result.failed }}</td></tr>{% endif %}
   </table>
 </div>
 
-{% if uncat > 0 %}
-<a class="btn block" href="/review">Review {{ uncat }} uncategorized ›</a>
+{% if uncat > 0 or to_confirm > 0 %}
+<a class="btn block" href="/review">
+  {% if uncat > 0 and to_confirm > 0 %}Review {{ uncat }} uncategorized + {{ to_confirm }} to confirm ›
+  {% elif uncat > 0 %}Review {{ uncat }} uncategorized ›
+  {% else %}Confirm {{ to_confirm }} multi-category charge{{ 's' if to_confirm != 1 }} ›{% endif %}
+</a>
 <p></p>
 {% endif %}
 <div class="actions">

@@ -105,6 +105,56 @@ def test_full_journey():
         r = client.get("/backup.db")
         assert r.status_code == 200 and len(r.content) > 1000
 
+        # The Costco charge is at a mixed-basket merchant: auto-categorized as
+        # Groceries by rule, but flagged for confirmation rather than assumed.
+        conn = db.connect(config.DB_PATH)
+        costco = conn.execute(
+            "SELECT id, category_id, needs_review, amount_cents FROM transactions "
+            "WHERE description LIKE '%COSTCO%'").fetchone()
+        conn.close()
+        assert costco["needs_review"] == 1
+        assert costco["category_id"] == cat_id("Groceries")
+
+        r = client.get("/review")
+        assert "Worth a look" in r.text and "COSTCO" in r.text
+
+        # Split it: 150.00 groceries + 81.80 clothing = 231.80
+        r = client.get(f"/transactions/{costco['id']}/split?back=/review")
+        assert r.status_code == 200
+        r = client.post(f"/transactions/{costco['id']}/split", data={
+            "csrf": get_csrf(r.text), "back": "/review",
+            "cat_00": str(cat_id("Groceries")), "amt_00": "150.00",
+            "cat_01": str(cat_id("Clothing")), "amt_01": "81.80"})
+        assert r.url.path == "/review"
+
+        conn = db.connect(config.DB_PATH)
+        parts = conn.execute(
+            "SELECT category_id, amount_cents FROM transaction_splits "
+            "WHERE transaction_id = ? ORDER BY sort_order", (costco["id"],)).fetchall()
+        alloc = conn.execute(
+            "SELECT SUM(amount_cents) AS t FROM txn_allocations WHERE txn_id = ?",
+            (costco["id"],)).fetchone()["t"]
+        still_flagged = conn.execute(
+            "SELECT needs_review FROM transactions WHERE id = ?",
+            (costco["id"],)).fetchone()["needs_review"]
+        conn.close()
+        assert [(p["category_id"], p["amount_cents"]) for p in parts] == [
+            (cat_id("Groceries"), -15000), (cat_id("Clothing"), -8180)]
+        assert alloc == costco["amount_cents"]      # parts still total the charge
+        assert still_flagged == 0
+
+        # A split that doesn't add up is rejected and explains itself
+        r = client.get(f"/transactions/{costco['id']}/split")
+        r = client.post(f"/transactions/{costco['id']}/split", data={
+            "csrf": get_csrf(r.text), "back": "/transactions",
+            "cat_00": str(cat_id("Groceries")), "amt_00": "10.00",
+            "cat_01": str(cat_id("Clothing")), "amt_01": "10.00"})
+        assert "off by" in r.text
+
+        # Splitting is visible on the dashboard budget bars
+        r = client.get("/?month=2026-08")
+        assert "Clothing" in r.text
+
         # Every remaining page renders
         conn = db.connect(config.DB_PATH)
         txn = conn.execute("SELECT id FROM transactions LIMIT 1").fetchone()

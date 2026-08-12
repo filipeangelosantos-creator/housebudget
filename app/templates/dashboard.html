@@ -46,6 +46,16 @@
 </a>
 {% endif %}
 
+{% if to_confirm > 0 %}
+<a href="/review" style="text-decoration:none">
+  <div class="banner warn">
+    <div class="grow"><strong>{{ to_confirm }}</strong> charge{{ 's' if to_confirm != 1 }} at shops that
+      usually cover several categories — confirm or split</div>
+    <span>Check ›</span>
+  </div>
+</a>
+{% endif %}
+
 {% for a in alerts %}
 <div class="banner bad">
   <div class="grow">⚠️ <strong>{{ a.category }}</strong> is {{ a.pct_change }}% above its 3-month average

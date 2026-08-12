@@ -1,5 +1,6 @@
-"""Transaction list/filter, quick categorization, edit page with rule
-learning, review queue for uncategorized, and manual entry."""
+"""Transaction list/filter, edit page with rule learning, the review queue
+(uncategorized plus mixed-basket confirmations), splitting one transaction
+across categories, and manual entry."""
 import uuid
 from datetime import date
 
@@ -8,7 +9,7 @@ from fastapi.responses import RedirectResponse
 
 from ..db import utcnow
 from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
-from ..services import classify
+from ..services import classify, splits as splits_svc
 from .dashboard import clean_month
 
 router = APIRouter()
@@ -67,7 +68,10 @@ def transactions_list(request: Request, conn=Depends(get_conn),
     page = max(1, page)
     rows = conn.execute(
         f"SELECT t.id, t.date, t.description, t.amount_cents, t.category_id, "
-        f"a.name AS account_name, a.type AS account_type, c.name AS category_name "
+        f"t.needs_review, a.name AS account_name, a.type AS account_type, "
+        f"c.name AS category_name, "
+        f"(SELECT COUNT(*) FROM transaction_splits s WHERE s.transaction_id = t.id) "
+        f"  AS n_splits "
         f"FROM transactions t JOIN accounts a ON a.id = t.account_id "
         f"LEFT JOIN categories c ON c.id = t.category_id "
         f"{where_sql} ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
@@ -120,6 +124,10 @@ def txn_new_submit(request: Request, conn=Depends(get_conn),
     return RedirectResponse("/transactions", status_code=303)
 
 
+def _safe_back(back: str) -> str:
+    return back if back.startswith("/") and not back.startswith("//") else "/transactions"
+
+
 @router.get("/transactions/{txn_id}")
 def txn_edit_page(txn_id: int, request: Request, conn=Depends(get_conn),
                   user=Depends(current_user), back: str = "/transactions"):
@@ -131,7 +139,11 @@ def txn_edit_page(txn_id: int, request: Request, conn=Depends(get_conn),
                   categories=_categories_grouped(conn),
                   suggested_pattern=classify.suggest_pattern(txn["description"]),
                   similar_uncat=similar_uncat,
-                  back=back if back.startswith("/") else "/transactions")
+                  splits=splits_svc.get_splits(conn, txn_id),
+                  history=splits_svc.merchant_history(conn, txn["merchant_key"], txn_id),
+                  mixed_basket=splits_svc.is_mixed_basket_merchant(
+                      txn["normalized_desc"], txn["merchant_key"]),
+                  back=_safe_back(back))
 
 
 @router.post("/transactions/{txn_id}", dependencies=[Depends(verify_csrf)])
@@ -140,23 +152,97 @@ def txn_edit_submit(txn_id: int, request: Request, conn=Depends(get_conn),
                     notes: str = Form(""), remember: str = Form(""),
                     pattern: str = Form(""), delete: str = Form(""),
                     back: str = Form("/transactions")):
-    txn = _txn_or_404(conn, txn_id)
-    if not back.startswith("/") or back.startswith("//"):
-        back = "/transactions"
+    _txn_or_404(conn, txn_id)
+    back = _safe_back(back)
     if delete:
         conn.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
         conn.commit()
         return RedirectResponse(back, status_code=303)
 
     cat = int(category_id) if category_id.isdigit() else None
-    conn.execute("UPDATE transactions SET category_id = ?, notes = ? WHERE id = ?",
-                 (cat, notes.strip(), txn_id))
+    if cat is not None and splits_svc.has_splits(conn, txn_id):
+        # Choosing a single category replaces the split allocation.
+        splits_svc.clear_splits(conn, txn_id)
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, notes = ?, needs_review = 0 "
+        "WHERE id = ?", (cat, notes.strip(), txn_id))
     conn.commit()
     if remember and cat and pattern.strip():
         rule_id = classify.create_rule(conn, pattern.strip(), cat)
         conn.commit()
         classify.apply_rules_to_uncategorized(conn, only_rule_id=rule_id)
     return RedirectResponse(back, status_code=303)
+
+
+# --- splitting one transaction across categories -----------------------------
+
+@router.get("/transactions/{txn_id}/split")
+def txn_split_page(txn_id: int, request: Request, conn=Depends(get_conn),
+                   user=Depends(current_user), back: str = "/transactions",
+                   error: str = ""):
+    txn = _txn_or_404(conn, txn_id)
+    existing = splits_svc.get_splits(conn, txn_id)
+    history = splits_svc.merchant_history(conn, txn["merchant_key"], txn_id)
+    if not existing:
+        # Pre-fill the first row with the current/most-likely category and the
+        # full amount, so you only type the part you're carving off.
+        first_cat = txn["category_id"] or (history[0]["category_id"] if history else None)
+        existing = [{"category_id": first_cat, "amount_cents": txn["amount_cents"],
+                     "note": ""}]
+    return render(request, conn, "txn_split.html", txn=txn, splits=existing,
+                  categories=_categories_grouped(conn), history=history,
+                  error=error, back=_safe_back(back),
+                  rows_to_show=max(3, len(existing) + 1))
+
+
+@router.post("/transactions/{txn_id}/split", dependencies=[Depends(verify_csrf)])
+async def txn_split_submit(txn_id: int, request: Request, conn=Depends(get_conn),
+                           user=Depends(current_user)):
+    txn = _txn_or_404(conn, txn_id)
+    form = await request.form()
+    back = _safe_back(str(form.get("back", "/transactions")))
+
+    if form.get("action") == "unsplit":
+        splits_svc.clear_splits(conn, txn_id)
+        return RedirectResponse(back, status_code=303)
+
+    sign = -1 if txn["amount_cents"] < 0 else 1
+    parts: list[splits_svc.Split] = []
+    for key in sorted(k for k in form.keys() if k.startswith("cat_")):
+        idx = key[4:]
+        cat_raw = str(form.get(f"cat_{idx}", ""))
+        amount_raw = str(form.get(f"amt_{idx}", ""))
+        if not cat_raw.isdigit():
+            continue
+        cents = abs(parse_money_input(amount_raw))
+        if cents == 0:
+            continue
+        parts.append(splits_svc.Split(
+            category_id=int(cat_raw), amount_cents=sign * cents,
+            note=str(form.get(f"note_{idx}", ""))))
+    try:
+        splits_svc.save_splits(conn, txn_id, parts)
+    except splits_svc.SplitError as e:
+        from urllib.parse import quote
+        return RedirectResponse(
+            f"/transactions/{txn_id}/split?back={quote(back, safe='/?=&')}"
+            f"&error={quote(str(e))}", status_code=303)
+    return RedirectResponse(back, status_code=303)
+
+
+@router.post("/transactions/{txn_id}/confirm", dependencies=[Depends(verify_csrf)])
+def txn_confirm(txn_id: int, request: Request, conn=Depends(get_conn),
+                user=Depends(current_user), category_id: str = Form(""),
+                remember: str = Form(""), pattern: str = Form(""),
+                back: str = Form("/review")):
+    txn = _txn_or_404(conn, txn_id)
+    cat = int(category_id) if category_id.isdigit() else txn["category_id"]
+    splits_svc.confirm_category(conn, txn_id, cat)
+    if remember and cat and pattern.strip():
+        rule_id = classify.create_rule(conn, pattern.strip(), cat)
+        conn.commit()
+        classify.apply_rules_to_uncategorized(conn, only_rule_id=rule_id)
+    return RedirectResponse(_safe_back(back), status_code=303)
 
 
 @router.get("/review")
@@ -170,8 +256,17 @@ def review_page(request: Request, conn=Depends(get_conn), user=Depends(current_u
     total = conn.execute(
         "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
     suggestions = {r["id"]: classify.suggest_pattern(r["description"]) for r in rows}
+    # What the app guessed for each one, from how you've filed that merchant before
+    guesses = {r["id"]: splits_svc.suggest_category(conn, r["merchant_key"], r["id"])
+               for r in rows}
+    confirms = splits_svc.pending_confirmations(conn)
+    for c in confirms:
+        c["history"] = splits_svc.merchant_history(conn, c["merchant_key"], c["id"])
+        c["pattern"] = classify.suggest_pattern(c["description"])
     return render(request, conn, "review.html", rows=rows, total=total,
-                  suggestions=suggestions, categories=_categories_grouped(conn))
+                  suggestions=suggestions, guesses=guesses, confirms=confirms,
+                  confirm_total=splits_svc.pending_confirmation_count(conn),
+                  categories=_categories_grouped(conn))
 
 
 @router.post("/review/{txn_id}", dependencies=[Depends(verify_csrf)])
@@ -182,7 +277,9 @@ def review_submit(txn_id: int, request: Request, conn=Depends(get_conn),
     if not category_id.isdigit():
         return RedirectResponse("/review", status_code=303)
     cat = int(category_id)
-    conn.execute("UPDATE transactions SET category_id = ? WHERE id = ?", (cat, txn_id))
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
+        (cat, txn_id))
     conn.commit()
     if remember:
         p = pattern.strip() or classify.suggest_pattern(txn["description"])

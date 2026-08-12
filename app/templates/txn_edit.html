@@ -13,6 +13,31 @@
     <div class="amt {{ 'pos' if txn.amount_cents > 0 }}" style="font-size:17px">{{ amount(txn.amount_cents) }}</div>
   </div>
 
+  {% if splits %}
+  <div class="split-view">
+    <div class="spread"><strong class="small">Split across {{ splits|length }} categories</strong>
+      <a class="small" href="/transactions/{{ txn.id }}/split?back={{ ('/transactions/' ~ txn.id)|urlencode }}">Edit split</a></div>
+    {% for s in splits %}
+    <div class="split-line">
+      <span>{{ s.category_name }}{% if s.note %} <span class="muted small">· {{ s.note }}</span>{% endif %}</span>
+      <span class="num">{{ currency }}{{ s.amount_cents|money }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="small muted">Choosing a single category below replaces this split.</p>
+  {% endif %}
+
+  {% if txn.needs_review and not splits %}
+  <div class="banner warn" style="margin:10px 0 0"><div class="grow small">
+    This shop usually covers several categories — confirm the category below or split it.
+  </div></div>
+  {% endif %}
+
+  {% if history %}
+  <p class="small muted" style="margin-bottom:0">Previously filed as
+    {% for h in history %}<strong>{{ h.name }}</strong> ({{ h.count }}×){{ ', ' if not loop.last }}{% endfor %}.</p>
+  {% endif %}
+
   <form method="post" action="/transactions/{{ txn.id }}">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="back" value="{{ back }}">
@@ -31,6 +56,9 @@
 
     <div class="actions">
       <button class="btn" type="submit">Save</button>
+      {% if not splits %}
+      <a class="btn ghost" href="/transactions/{{ txn.id }}/split?back={{ back|urlencode }}">Split…</a>
+      {% endif %}
     </div>
   </form>
   <form method="post" action="/transactions/{{ txn.id }}" data-confirm="Delete this transaction?" style="margin-top:10px">

@@ -51,9 +51,13 @@ def latest_budget_month_before(conn, month: str) -> str | None:
 
 
 def actuals_by_category(conn, month: str) -> dict[int | None, int]:
-    """Signed sums per category for the month (uncategorized under None)."""
+    """Signed sums per category for the month (uncategorized under None).
+
+    Reads txn_allocations so a split transaction contributes each part to its
+    own category rather than the whole amount to one.
+    """
     rows = conn.execute(
-        "SELECT category_id, SUM(amount_cents) AS total FROM transactions "
+        "SELECT category_id, SUM(amount_cents) AS total FROM txn_allocations "
         "WHERE substr(date, 1, 7) = ? GROUP BY category_id", (month,)).fetchall()
     return {r["category_id"]: r["total"] or 0 for r in rows}
 

@@ -4,13 +4,66 @@
 {% block content %}
 
 <h1>Review queue</h1>
-{% if total == 0 %}
-<div class="card"><p style="margin:4px 0">🎉 All transactions are categorized.</p>
-<p class="small muted">New imports land here whenever the auto-classifier isn't sure.</p></div>
-{% else %}
-<p class="small muted">{{ total }} uncategorized transaction{{ 's' if total != 1 }}.
-Pick a category — with “remember” checked, similar transactions are matched automatically from now on.
-<a href="/rules">Manage rules</a></p>
+
+{% if total == 0 and confirm_total == 0 %}
+<div class="card"><p style="margin:4px 0">🎉 Everything is categorized and confirmed.</p>
+<p class="small muted">New imports land here when the app isn't sure, or when a
+shop like Costco or Amazon usually covers more than one category.</p></div>
+{% endif %}
+
+{% if confirms %}
+<div class="card" style="border-left:4px solid var(--warning)">
+  <h2>Worth a look ({{ confirm_total }})</h2>
+  <p class="small muted" style="margin-top:-4px">These are at shops that usually cover
+  several categories. Confirm the guess, or split the receipt.</p>
+</div>
+
+{% for t in confirms %}
+<div class="card">
+  <div class="spread">
+    <div>
+      <div style="font-size:15px">{{ t.description }}</div>
+      <div class="small muted">{{ t.date }} · {{ t.account_name }}</div>
+    </div>
+    <div class="amt">{{ amount(t.amount_cents) }}</div>
+  </div>
+
+  <p class="small" style="margin:8px 0 4px">
+    {% if t.history %}
+      Usually <strong>{{ t.history[0].name }}</strong> here
+      ({{ t.history[0].count }}× before){% if t.history|length > 1 %}, sometimes
+      {{ t.history[1].name }}{% endif %} — filed as
+      <strong>{{ t.category_name }}</strong>.
+    {% else %}
+      Best guess: <strong>{{ t.category_name }}</strong>.
+    {% endif %}
+  </p>
+
+  <form method="post" action="/transactions/{{ t.id }}/confirm">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="back" value="/review">
+    <input type="hidden" name="pattern" value="{{ t.pattern }}">
+    <div class="form-row">
+      {{ category_select('category_id', categories, selected=t.category_id,
+                         include_blank=False) }}
+      <button class="btn" type="submit" style="flex:0 0 auto">Confirm</button>
+    </div>
+    <div class="spread" style="margin-top:8px">
+      <label class="check" style="margin:0"><input type="checkbox" name="remember" value="1">
+        <span class="small">Always file “{{ t.pattern }}” here</span></label>
+      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review">Split…</a>
+    </div>
+  </form>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if total > 0 %}
+<div class="card" style="border-left:4px solid var(--accent)">
+  <h2>Needs a category ({{ total }})</h2>
+  <p class="small muted" style="margin-top:-4px">With “remember” checked, similar
+  transactions are filed automatically from now on. <a href="/rules">Manage rules</a></p>
+</div>
 
 {% for t in rows %}
 <div class="card">
@@ -21,15 +74,23 @@ Pick a category — with “remember” checked, similar transactions are matche
     </div>
     <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
   </div>
+  {% if guesses.get(t.id) %}
+  <p class="small" style="margin:8px 0 0">You've used
+    <strong>{{ guesses[t.id].name }}</strong> for this merchant {{ guesses[t.id].count }}× before.</p>
+  {% endif %}
   <form method="post" action="/review/{{ t.id }}" style="margin-top:8px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="pattern" value="{{ suggestions[t.id] }}">
     <div class="form-row">
-      {{ category_select('category_id', categories, autosubmit=False) }}
+      {{ category_select('category_id', categories,
+                         selected=(guesses[t.id].category_id if guesses.get(t.id) else None)) }}
       <button class="btn" type="submit" style="flex:0 0 auto">Save</button>
     </div>
-    <label class="check"><input type="checkbox" name="remember" value="1" checked>
-      <span class="small">Remember: always file “<strong>{{ suggestions[t.id] }}</strong>” here</span></label>
+    <div class="spread" style="margin-top:8px">
+      <label class="check" style="margin:0"><input type="checkbox" name="remember" value="1" checked>
+        <span class="small">Always file “<strong>{{ suggestions[t.id] }}</strong>” here</span></label>
+      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review">Split…</a>
+    </div>
   </form>
 </div>
 {% endfor %}

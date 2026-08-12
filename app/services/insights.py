@@ -1,14 +1,17 @@
 """Insights: cashflow trend, category trends, top merchants, recurring
-charges, anomaly detection. All computed from non-excluded categories so
-transfers and credit-card payments never distort the numbers."""
+charges, anomaly detection.
+
+Everything reads the txn_allocations view, so a split transaction contributes
+each part to its own category. Excluded categories (transfers, credit-card
+payments) and uncategorized money are both left out, which keeps these numbers
+identical to the dashboard's — the uncategorized backlog is reported on its own
+rather than silently inflating income and spending.
+"""
 from dataclasses import dataclass
 
 from .budgets import shift_month
 
-_NOT_EXCLUDED = (
-    "(t.category_id IS NULL OR t.category_id IN "
-    "(SELECT id FROM categories WHERE excluded = 0))"
-)
+_COUNTED = "a.category_id IN (SELECT id FROM categories WHERE excluded = 0)"
 
 
 def months_back(month: str, n: int) -> list[str]:
@@ -19,11 +22,11 @@ def months_back(month: str, n: int) -> list[str]:
 def cashflow(conn, month: str, n: int = 12) -> list[dict]:
     seq = months_back(month, n)
     rows = conn.execute(
-        f"""SELECT substr(t.date,1,7) AS m,
-               SUM(CASE WHEN t.amount_cents > 0 THEN t.amount_cents ELSE 0 END) AS income,
-               SUM(CASE WHEN t.amount_cents < 0 THEN -t.amount_cents ELSE 0 END) AS spent
-            FROM transactions t
-            WHERE substr(t.date,1,7) >= ? AND substr(t.date,1,7) <= ? AND {_NOT_EXCLUDED}
+        f"""SELECT substr(a.date,1,7) AS m,
+               SUM(CASE WHEN a.amount_cents > 0 THEN a.amount_cents ELSE 0 END) AS income,
+               SUM(CASE WHEN a.amount_cents < 0 THEN -a.amount_cents ELSE 0 END) AS spent
+            FROM txn_allocations a
+            WHERE substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ? AND {_COUNTED}
             GROUP BY m""", (seq[0], seq[-1])).fetchall()
     by_month = {r["m"]: r for r in rows}
     return [{"month": m,
@@ -36,13 +39,13 @@ def category_trends(conn, month: str, n: int = 6, top: int = 8) -> list[dict]:
     """Per-category monthly spend for the top spending categories."""
     seq = months_back(month, n)
     rows = conn.execute(
-        """SELECT t.category_id, c.name, substr(t.date,1,7) AS m,
-                  SUM(-t.amount_cents) AS spent
-           FROM transactions t JOIN categories c ON c.id = t.category_id
+        """SELECT a.category_id, c.name, substr(a.date,1,7) AS m,
+                  SUM(-a.amount_cents) AS spent
+           FROM txn_allocations a JOIN categories c ON c.id = a.category_id
            JOIN category_groups g ON g.id = c.group_id
            WHERE g.kind = 'expense' AND c.excluded = 0
-             AND substr(t.date,1,7) >= ? AND substr(t.date,1,7) <= ?
-           GROUP BY t.category_id, m""", (seq[0], seq[-1])).fetchall()
+             AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+           GROUP BY a.category_id, m""", (seq[0], seq[-1])).fetchall()
     per_cat: dict[int, dict] = {}
     for r in rows:
         entry = per_cat.setdefault(
@@ -56,22 +59,33 @@ def category_trends(conn, month: str, n: int = 6, top: int = 8) -> list[dict]:
 
 def top_merchants(conn, month: str, limit: int = 10) -> list[dict]:
     rows = conn.execute(
-        f"""SELECT t.merchant_key AS merchant, COUNT(*) AS n,
-                   SUM(-t.amount_cents) AS spent
-            FROM transactions t
-            WHERE substr(t.date,1,7) = ? AND t.amount_cents < 0 AND {_NOT_EXCLUDED}
-            GROUP BY t.merchant_key ORDER BY spent DESC LIMIT ?""",
+        f"""SELECT a.merchant_key AS merchant, COUNT(DISTINCT a.txn_id) AS n,
+                   SUM(-a.amount_cents) AS spent
+            FROM txn_allocations a
+            WHERE substr(a.date,1,7) = ? AND a.amount_cents < 0 AND {_COUNTED}
+            GROUP BY a.merchant_key ORDER BY spent DESC LIMIT ?""",
         (month, limit)).fetchall()
     return [dict(r) for r in rows]
 
 
 def largest_transactions(conn, month: str, limit: int = 8) -> list[dict]:
+    """Biggest single charges, shown whole (a split one names its parts)."""
     rows = conn.execute(
-        f"""SELECT t.id, t.date, t.description, t.amount_cents, c.name AS category
-            FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-            WHERE substr(t.date,1,7) = ? AND t.amount_cents < 0 AND {_NOT_EXCLUDED}
-            ORDER BY t.amount_cents ASC LIMIT ?""", (month, limit)).fetchall()
-    return [dict(r) for r in rows]
+        f"""SELECT a.txn_id AS id, a.date, a.description,
+                   SUM(a.amount_cents) AS amount_cents,
+                   COUNT(DISTINCT a.category_id) AS n_categories,
+                   MIN(c.name) AS category
+            FROM txn_allocations a LEFT JOIN categories c ON c.id = a.category_id
+            WHERE substr(a.date,1,7) = ? AND {_COUNTED}
+            GROUP BY a.txn_id HAVING SUM(a.amount_cents) < 0
+            ORDER BY SUM(a.amount_cents) ASC LIMIT ?""", (month, limit)).fetchall()
+    out = []
+    for r in rows:
+        row = dict(r)
+        if row["n_categories"] > 1:
+            row["category"] = f"split across {row['n_categories']} categories"
+        out.append(row)
+    return out
 
 
 @dataclass
@@ -88,12 +102,13 @@ def recurring_charges(conn, month: str, lookback: int = 5) -> list[Recurring]:
     your subscriptions and recurring bills."""
     seq = months_back(month, lookback)
     rows = conn.execute(
-        f"""SELECT t.merchant_key AS merchant, substr(t.date,1,7) AS m,
-                   t.amount_cents, t.date, c.name AS category
-            FROM transactions t LEFT JOIN categories c ON c.id = t.category_id
-            WHERE t.amount_cents < 0 AND substr(t.date,1,7) >= ?
-              AND substr(t.date,1,7) <= ? AND {_NOT_EXCLUDED}
-            ORDER BY t.date""", (seq[0], seq[-1])).fetchall()
+        f"""SELECT a.merchant_key AS merchant, substr(a.date,1,7) AS m,
+                   SUM(a.amount_cents) AS amount_cents, a.date AS date,
+                   MIN(c.name) AS category
+            FROM txn_allocations a LEFT JOIN categories c ON c.id = a.category_id
+            WHERE substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ? AND {_COUNTED}
+            GROUP BY a.txn_id HAVING SUM(a.amount_cents) < 0
+            ORDER BY a.date""", (seq[0], seq[-1])).fetchall()
     grouped: dict[str, list] = {}
     for r in rows:
         if r["merchant"]:
@@ -108,9 +123,10 @@ def recurring_charges(conn, month: str, lookback: int = 5) -> list[Recurring]:
         median = amounts[len(amounts) // 2]
         if median <= 0:
             continue
-        close = [a for a in amounts if abs(a - median) <= max(200, median * 0.2)]
-        if len(close) < 3 or len({t["m"] for t in txns
-                                  if abs(-t["amount_cents"] - median) <= max(200, median * 0.2)}) < 3:
+        tolerance = max(200, median * 0.2)
+        close_months = {t["m"] for t in txns
+                        if abs(-t["amount_cents"] - median) <= tolerance}
+        if len(close_months) < 3:
             continue
         out.append(Recurring(
             merchant=merchant, monthly_cents=median, months_seen=len(months),
@@ -136,11 +152,11 @@ def anomalies(conn, month: str, factor: float = 1.5,
     """Expense categories well above their average of the previous 3 months."""
     prev = months_back(shift_month(month, -1), 3)
     rows = conn.execute(
-        """SELECT c.id, c.name, substr(t.date,1,7) AS m, SUM(-t.amount_cents) AS spent
-           FROM transactions t JOIN categories c ON c.id = t.category_id
+        """SELECT c.id, c.name, substr(a.date,1,7) AS m, SUM(-a.amount_cents) AS spent
+           FROM txn_allocations a JOIN categories c ON c.id = a.category_id
            JOIN category_groups g ON g.id = c.group_id
            WHERE g.kind = 'expense' AND c.excluded = 0
-             AND substr(t.date,1,7) >= ? AND substr(t.date,1,7) <= ?
+             AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
            GROUP BY c.id, m""", (prev[0], month)).fetchall()
     current: dict[int, dict] = {}
     history: dict[int, list[int]] = {}

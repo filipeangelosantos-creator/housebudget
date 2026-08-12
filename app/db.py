@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA = """
 CREATE TABLE users (
@@ -74,12 +74,40 @@ CREATE TABLE transactions (
     dedupe_hash TEXT NOT NULL UNIQUE,
     notes TEXT NOT NULL DEFAULT '',
     manual INTEGER NOT NULL DEFAULT 0,
+    -- 1 when the app wants you to confirm the category (mixed-basket merchant)
+    needs_review INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL
 );
 CREATE INDEX idx_txn_date ON transactions(date);
 CREATE INDEX idx_txn_account_date ON transactions(account_id, date);
 CREATE INDEX idx_txn_category ON transactions(category_id);
 CREATE INDEX idx_txn_merchant ON transactions(merchant_key);
+
+-- One receipt, several budget categories (Costco run = groceries + clothes).
+-- Splits must sum exactly to the transaction amount.
+CREATE TABLE transaction_splits (
+    id INTEGER PRIMARY KEY,
+    transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    amount_cents INTEGER NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    sort_order INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_splits_txn ON transaction_splits(transaction_id);
+
+-- Every money aggregate reads this instead of `transactions`: an unsplit
+-- transaction yields one row, a split one yields a row per part.
+CREATE VIEW txn_allocations AS
+SELECT t.id                                        AS txn_id,
+       t.account_id                                AS account_id,
+       t.date                                      AS date,
+       t.description                               AS description,
+       t.merchant_key                              AS merchant_key,
+       COALESCE(s.category_id, t.category_id)      AS category_id,
+       COALESCE(s.amount_cents, t.amount_cents)    AS amount_cents,
+       CASE WHEN s.id IS NULL THEN 0 ELSE 1 END    AS is_split
+FROM transactions t
+LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
 
 CREATE TABLE rules (
     id INTEGER PRIMARY KEY,
@@ -108,7 +136,35 @@ CREATE TABLE settings (
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
-MIGRATIONS: list[tuple[int, str]] = []
+# A freshly created database is stamped at SCHEMA_VERSION, so these only run
+# for databases created by an older release.
+MIGRATIONS: list[tuple[int, str]] = [
+    (2, """
+    ALTER TABLE transactions ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0;
+
+    CREATE TABLE transaction_splits (
+        id INTEGER PRIMARY KEY,
+        transaction_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        category_id INTEGER NOT NULL REFERENCES categories(id),
+        amount_cents INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX idx_splits_txn ON transaction_splits(transaction_id);
+
+    CREATE VIEW txn_allocations AS
+    SELECT t.id                                     AS txn_id,
+           t.account_id                             AS account_id,
+           t.date                                   AS date,
+           t.description                            AS description,
+           t.merchant_key                           AS merchant_key,
+           COALESCE(s.category_id, t.category_id)   AS category_id,
+           COALESCE(s.amount_cents, t.amount_cents) AS amount_cents,
+           CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS is_split
+    FROM transactions t
+    LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
+    """),
+]
 
 
 def utcnow() -> str:
