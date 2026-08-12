@@ -9,9 +9,15 @@
     <tr><td>Auto-categorized</td><td class="num">{{ result.categorized }}</td></tr>
     <tr><td>Duplicates skipped</td><td class="num">{{ result.duplicates }}</td></tr>
     {% if result.to_confirm %}<tr><td>Worth confirming or splitting</td><td class="num">{{ result.to_confirm }}</td></tr>{% endif %}
+    {% if linked %}<tr><td>Transfers matched to their other side</td><td class="num">{{ linked }}</td></tr>{% endif %}
     {% if result.failed %}<tr><td>Unreadable rows</td><td class="num">{{ result.failed }}</td></tr>{% endif %}
   </table>
 </div>
+
+{% if transfer_suggestions > 0 %}
+<a class="btn ghost block" href="/transfers" style="margin-bottom:10px">
+  Check {{ transfer_suggestions }} possible transfer{{ 's' if transfer_suggestions != 1 }} ›</a>
+{% endif %}
 
 {% if uncat > 0 or to_confirm > 0 %}
 <a class="btn block" href="/review">

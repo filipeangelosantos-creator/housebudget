@@ -46,6 +46,16 @@
 </a>
 {% endif %}
 
+{% if transfer_suggestions > 0 %}
+<a href="/transfers" style="text-decoration:none">
+  <div class="banner">
+    <div class="grow"><strong>{{ transfer_suggestions }}</strong> possible transfer{{ 's' if transfer_suggestions != 1 }}
+      between your accounts — confirm so they don't count as spending</div>
+    <span>Check ›</span>
+  </div>
+</a>
+{% endif %}
+
 {% if to_confirm > 0 %}
 <a href="/review" style="text-decoration:none">
   <div class="banner warn">

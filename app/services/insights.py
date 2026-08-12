@@ -7,11 +7,18 @@ payments) and uncategorized money are both left out, which keeps these numbers
 identical to the dashboard's — the uncategorized backlog is reported on its own
 rather than silently inflating income and spending.
 """
+import calendar
 from dataclasses import dataclass
+from datetime import date
 
 from .budgets import shift_month
 
-_COUNTED = "a.category_id IN (SELECT id FROM categories WHERE excluded = 0)"
+_EXPENSE_CATS = ("a.category_id IN (SELECT c.id FROM categories c "
+                 "JOIN category_groups g ON g.id = c.group_id "
+                 "WHERE g.kind = 'expense' AND c.excluded = 0)")
+
+_COUNTED = ("a.is_transfer = 0 "
+            "AND a.category_id IN (SELECT id FROM categories WHERE excluded = 0)")
 
 
 def months_back(month: str, n: int) -> list[str]:
@@ -43,7 +50,7 @@ def category_trends(conn, month: str, n: int = 6, top: int = 8) -> list[dict]:
                   SUM(-a.amount_cents) AS spent
            FROM txn_allocations a JOIN categories c ON c.id = a.category_id
            JOIN category_groups g ON g.id = c.group_id
-           WHERE g.kind = 'expense' AND c.excluded = 0
+           WHERE g.kind = 'expense' AND c.excluded = 0 AND a.is_transfer = 0
              AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
            GROUP BY a.category_id, m""", (seq[0], seq[-1])).fetchall()
     per_cat: dict[int, dict] = {}
@@ -86,6 +93,173 @@ def largest_transactions(conn, month: str, limit: int = 8) -> list[dict]:
             row["category"] = f"split across {row['n_categories']} categories"
         out.append(row)
     return out
+
+
+def days_in_month(month: str) -> int:
+    return calendar.monthrange(int(month[:4]), int(month[5:7]))[1]
+
+
+def _daily_spend(conn, month: str) -> dict[int, int]:
+    rows = conn.execute(
+        f"""SELECT CAST(substr(a.date, 9, 2) AS INTEGER) AS day,
+                   SUM(-a.amount_cents) AS spent
+            FROM txn_allocations a
+            WHERE substr(a.date,1,7) = ? AND a.amount_cents < 0
+              AND a.is_transfer = 0 AND {_EXPENSE_CATS}
+            GROUP BY day""", (month,)).fetchall()
+    return {r["day"]: r["spent"] for r in rows}
+
+
+def _cumulative(daily: dict[int, int], days: int) -> list[int]:
+    out, running = [], 0
+    for d in range(1, days + 1):
+        running += daily.get(d, 0)
+        out.append(running)
+    return out
+
+
+def spending_pace(conn, month: str, today: date | None = None) -> dict:
+    """Cumulative spend through the month, against last month and budget pace.
+
+    Answers 'are we ahead of where we were?' partway through a month, which a
+    month-end total can't tell you. `today` is injectable so the projection is
+    testable without depending on the wall clock.
+    """
+    prev = shift_month(month, -1)
+    days, prev_days = days_in_month(month), days_in_month(prev)
+    this_series = _cumulative(_daily_spend(conn, month), days)
+    prev_series = _cumulative(_daily_spend(conn, prev), prev_days)
+
+    budget = conn.execute(
+        """SELECT COALESCE(SUM(b.amount_cents), 0) AS total FROM budgets b
+           JOIN categories c ON c.id = b.category_id
+           JOIN category_groups g ON g.id = c.group_id
+           WHERE b.month = ? AND g.kind = 'expense' AND c.excluded = 0""",
+        (month,)).fetchone()["total"]
+
+    today = today or date.today()
+    elapsed = today.day if month == today.strftime("%Y-%m") else days
+    elapsed = max(1, min(elapsed, days))
+    spent = this_series[elapsed - 1] if this_series else 0
+    prev_same_day = prev_series[min(elapsed, prev_days) - 1] if prev_series else 0
+    # Straight-line budget pace: where you'd be if spending evenly.
+    on_pace = round(budget * elapsed / days) if budget else 0
+    projected = round(spent * days / elapsed) if elapsed else 0
+
+    return {"days": days, "elapsed": elapsed, "this": this_series,
+            "prev": prev_series, "prev_days": prev_days, "budget": budget,
+            "spent": spent, "prev_same_day": prev_same_day, "on_pace": on_pace,
+            "projected": projected, "month": month, "prev_month": prev}
+
+
+def monthly_net(conn, month: str, n: int = 12) -> list[dict]:
+    """Income minus spending per month — surplus or deficit at a glance."""
+    seq = months_back(month, n)
+    rows = conn.execute(
+        f"""SELECT substr(a.date,1,7) AS m, SUM(a.amount_cents) AS net
+            FROM txn_allocations a
+            WHERE substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ? AND {_COUNTED}
+            GROUP BY m""", (seq[0], seq[-1])).fetchall()
+    by_month = {r["m"]: r["net"] for r in rows}
+    return [{"month": m, "net": by_month.get(m, 0)} for m in seq]
+
+
+def category_composition(conn, month: str, n: int = 12, top: int = 6) -> dict:
+    """Monthly spend split by the biggest categories, everything else as Other."""
+    seq = months_back(month, n)
+    rows = conn.execute(
+        f"""SELECT c.name, substr(a.date,1,7) AS m, SUM(-a.amount_cents) AS spent
+            FROM txn_allocations a JOIN categories c ON c.id = a.category_id
+            WHERE substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+              AND a.amount_cents < 0 AND a.is_transfer = 0 AND {_EXPENSE_CATS}
+            GROUP BY c.id, m""", (seq[0], seq[-1])).fetchall()
+    totals: dict[str, int] = {}
+    per_month: dict[str, dict[str, int]] = {}
+    for r in rows:
+        totals[r["name"]] = totals.get(r["name"], 0) + r["spent"]
+        per_month.setdefault(r["name"], {})[r["m"]] = r["spent"]
+    ranked = sorted(totals, key=lambda k: -totals[k])
+    keep, rest = ranked[:top], ranked[top:]
+
+    # NB: the per-month list is called "monthly", not "values" — Jinja resolves
+    # `series.values` to dict.values() and would silently render nothing.
+    series = [{"name": name, "total": totals[name],
+               "monthly": [max(0, per_month[name].get(m, 0)) for m in seq]}
+              for name in keep]
+    if rest:
+        other = [sum(max(0, per_month[name].get(m, 0)) for name in rest) for m in seq]
+        if any(other):
+            series.append({"name": "Other", "total": sum(totals[n] for n in rest),
+                           "monthly": other})
+    return {"months": seq, "series": series}
+
+
+@dataclass
+class Mover:
+    category: str
+    current: int
+    average: int
+
+    @property
+    def change(self) -> int:
+        return self.current - self.average
+
+    @property
+    def pct_change(self) -> int:
+        return round(100 * self.change / self.average) if self.average else 0
+
+
+def biggest_movers(conn, month: str, limit: int = 6,
+                   min_change_cents: int = 2000) -> list[Mover]:
+    """Categories that moved most against their 3-month average, up or down."""
+    prev = months_back(shift_month(month, -1), 3)
+    rows = conn.execute(
+        f"""SELECT c.name, substr(a.date,1,7) AS m, SUM(-a.amount_cents) AS spent
+            FROM txn_allocations a JOIN categories c ON c.id = a.category_id
+            WHERE substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+              AND a.is_transfer = 0 AND {_EXPENSE_CATS}
+            GROUP BY c.id, m""", (prev[0], month)).fetchall()
+    current: dict[str, int] = {}
+    history: dict[str, list[int]] = {}
+    for r in rows:
+        if r["m"] == month:
+            current[r["name"]] = r["spent"]
+        elif r["m"] in prev:
+            history.setdefault(r["name"], []).append(r["spent"])
+
+    movers = []
+    for name in set(current) | set(history):
+        hist = history.get(name, [])
+        if not hist:
+            continue
+        avg = sum(hist) // len(hist)
+        cur = current.get(name, 0)
+        if abs(cur - avg) >= min_change_cents:
+            movers.append(Mover(category=name, current=cur, average=avg))
+    movers.sort(key=lambda m: -abs(m.change))
+    return movers[:limit]
+
+
+def year_over_year(conn, month: str) -> dict | None:
+    """This month against the same month a year ago, when that data exists."""
+    last_year = shift_month(month, -12)
+    rows = conn.execute(
+        f"""SELECT substr(a.date,1,7) AS m,
+                   SUM(CASE WHEN a.amount_cents > 0 THEN a.amount_cents ELSE 0 END) AS income,
+                   SUM(CASE WHEN a.amount_cents < 0 THEN -a.amount_cents ELSE 0 END) AS spent
+            FROM txn_allocations a
+            WHERE substr(a.date,1,7) IN (?, ?) AND {_COUNTED}
+            GROUP BY m""", (month, last_year)).fetchall()
+    by_month = {r["m"]: r for r in rows}
+    if last_year not in by_month or month not in by_month:
+        return None
+    now, then = by_month[month], by_month[last_year]
+    if not then["spent"]:
+        return None
+    return {"month": month, "last_year": last_year,
+            "spent_now": now["spent"], "spent_then": then["spent"],
+            "income_now": now["income"], "income_then": then["income"],
+            "spent_pct": round(100 * (now["spent"] - then["spent"]) / then["spent"])}
 
 
 @dataclass
@@ -155,7 +329,7 @@ def anomalies(conn, month: str, factor: float = 1.5,
         """SELECT c.id, c.name, substr(a.date,1,7) AS m, SUM(-a.amount_cents) AS spent
            FROM txn_allocations a JOIN categories c ON c.id = a.category_id
            JOIN category_groups g ON g.id = c.group_id
-           WHERE g.kind = 'expense' AND c.excluded = 0
+           WHERE g.kind = 'expense' AND c.excluded = 0 AND a.is_transfer = 0
              AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
            GROUP BY c.id, m""", (prev[0], month)).fetchall()
     current: dict[int, dict] = {}

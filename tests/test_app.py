@@ -99,7 +99,13 @@ def test_full_journey():
 
         # Insights, export, backup
         r = client.get("/insights?month=2026-08")
-        assert "Cashflow" in r.text and "Top merchants" in r.text
+        for section in ("Spending pace", "Surplus &amp; deficit",
+                        "Income vs spending", "Where it goes", "Top merchants"):
+            assert section in r.text, f"missing insights section: {section}"
+        # charts carry real numbers, not silently-empty template lookups
+        assert re.search(r'legend-val">\$(?!0\.00)[\d,]+\.\d\d', r.text), \
+            "composition legend rendered no values"
+        assert "NaN" not in r.text
         r = client.get("/export.csv")
         assert r.status_code == 200 and "WALMART" in r.text
         r = client.get("/backup.db")
@@ -161,8 +167,9 @@ def test_full_journey():
         conn.close()
         for path in ("/transactions", "/transactions?month=all&q=star",
                      "/transactions/new", f"/transactions/{txn['id']}",
+                     f"/transactions/{txn['id']}/split",
                      "/accounts", "/categories", "/rules", "/settings",
-                     "/imports", "/review", "/healthz"):
+                     "/imports", "/review", "/transfers", "/healthz"):
             r = client.get(path)
             assert r.status_code == 200, f"{path} -> {r.status_code}"
 

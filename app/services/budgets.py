@@ -58,7 +58,8 @@ def actuals_by_category(conn, month: str) -> dict[int | None, int]:
     """
     rows = conn.execute(
         "SELECT category_id, SUM(amount_cents) AS total FROM txn_allocations "
-        "WHERE substr(date, 1, 7) = ? GROUP BY category_id", (month,)).fetchall()
+        "WHERE substr(date, 1, 7) = ? AND is_transfer = 0 GROUP BY category_id",
+        (month,)).fetchall()
     return {r["category_id"]: r["total"] or 0 for r in rows}
 
 
@@ -161,8 +162,10 @@ def month_summary(conn, month: str, include_empty: bool = False) -> MonthSummary
             summary.expense_budget += block.budget
 
     row = conn.execute(
-        "SELECT COUNT(*) AS n, COALESCE(SUM(amount_cents), 0) AS total "
-        "FROM transactions WHERE category_id IS NULL AND substr(date, 1, 7) = ?",
+        "SELECT COUNT(*) AS n, COALESCE(SUM(t.amount_cents), 0) AS total "
+        "FROM transactions t WHERE t.category_id IS NULL AND substr(t.date, 1, 7) = ? "
+        "  AND NOT EXISTS (SELECT 1 FROM transfer_links l "
+        "                  WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)",
         (month,)).fetchone()
     summary.uncategorized_count = row["n"]
     summary.uncategorized_amount = row["total"]

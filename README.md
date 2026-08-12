@@ -12,9 +12,9 @@ you own and can back up with one tap.
 |---|---|---|
 | ![Dashboard](docs/screenshots/01-dashboard.png) | ![Insights](docs/screenshots/02-insights.png) | ![Import](docs/screenshots/06b-preview-flipped.png) |
 
-| Review queue — confirm or split | Splitting one receipt |
-|---|---|
-| ![Review](docs/screenshots/03-review.png) | ![Split](docs/screenshots/08-split.png) |
+| Review queue — confirm or split | Splitting one receipt | Transfer matching |
+|---|---|---|
+| ![Review](docs/screenshots/03-review.png) | ![Split](docs/screenshots/08-split.png) | ![Transfers](docs/screenshots/11-transfers.png) |
 
 ## What it does
 
@@ -39,9 +39,18 @@ you own and can back up with one tap.
   payments are tracked but excluded from budgets and insights.
 - **Budget vs. actuals** — monthly budgets per category (copy last month with
   one tap), progress bars that go orange near the limit and red over it.
-- **Insights** — 12-month cashflow, per-category trends, top merchants,
-  largest expenses, **recurring-subscription detection**, savings rate, and
-  alerts when a category runs well above its 3-month average.
+- **Transfers are matched, not guessed** — money moved between your own
+  accounts (savings to checking, paying a card) is found by matching the two
+  sides to each other: same amount, opposite direction, a few days apart. That
+  works whatever your bank calls it. Obvious pairs link themselves; anything
+  less certain is offered for confirmation, and a recurring monthly move is
+  confirmed once for all of its occurrences. A one-sided transfer is flagged,
+  because it usually means a statement is missing.
+- **Insights** — spending pace against last month and budget, monthly surplus
+  and deficit, 12-month cashflow, where the money goes over time, biggest
+  movers against a 3-month average, year-over-year, per-category trends, top
+  merchants, largest expenses, **recurring-subscription detection**, savings
+  rate, and alerts when a category runs well above its usual.
 - **Two logins, one household** — separate passwords for each of you, same
   shared data. Works great on phones (installable as a home-screen app),
   light and dark mode.
@@ -125,12 +134,6 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
   gross entry plus deduction entries and then matching them against the deposit
   already in your statement, to avoid counting pay twice. A short manual form
   would be far more reliable than parsing employer PDFs, which vary and change.
-- **Transfer pairing** — transfers between your own accounts and credit-card
-  payments are currently recognized by description text (`TRANSFER`, `PAYMENT
-  THANK YOU`, …) and excluded from budgets on each side independently. Matching
-  the two sides to each other — same amount, opposite sign, a few days apart,
-  two of your accounts — would make this independent of how your bank words
-  things and would surface any transfer where only one side was seen.
 - **Automatic bank sync** — true automatic connections require either your
   bank's official API (open banking, where available) or a third-party
   aggregator (Plaid, GoCardless, …), which conflicts with the
@@ -153,9 +156,13 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
 - **Stack**: FastAPI + Jinja2 server-rendered pages, SQLite, no JS framework
   (one small progressive-enhancement script), charts are server-generated SVG.
 - **Layout**: `app/parsing/` (statement formats) · `app/services/` (classify,
-  import/dedupe, budgets, splits, insights, charts) · `app/routes/` +
-  `app/templates/` (pages) · `tests/` (44 tests: parsers, dedupe, rules, budget
-  math, splitting, insights, schema migration, and a full end-to-end journey).
+  import/dedupe, budgets, splits, transfers, insights, charts) · `app/routes/`
+  + `app/templates/` (pages) · `tests/` (66 tests: parsers, dedupe, rules,
+  budget math, splitting, transfer pairing, analytics, chart rendering, schema
+  migration, and a full end-to-end journey).
+- Charts are server-rendered SVG with no JS library. The categorical palette is
+  fixed-order and validated for colour-blind separation and contrast in both
+  light and dark mode; series colours are never cycled or reassigned.
 - Money is stored as integer cents; expenses negative, income positive.
 - Every money aggregate reads the `txn_allocations` view rather than the
   `transactions` table, so a split transaction contributes each part to its own

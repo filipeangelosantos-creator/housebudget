@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA = """
 CREATE TABLE users (
@@ -95,6 +95,24 @@ CREATE TABLE transaction_splits (
 );
 CREATE INDEX idx_splits_txn ON transaction_splits(transaction_id);
 
+-- Two sides of the same internal movement (savings -> checking, checking ->
+-- credit card). Linked transactions are money you already had, so they count
+-- as neither income nor spending.
+CREATE TABLE transfer_links (
+    id INTEGER PRIMARY KEY,
+    out_txn_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+    in_txn_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+    source TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','manual')),
+    created_at TEXT NOT NULL
+);
+
+-- Pairs you told us are not a transfer, so we stop suggesting them.
+CREATE TABLE transfer_dismissals (
+    out_txn_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    in_txn_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+    PRIMARY KEY (out_txn_id, in_txn_id)
+);
+
 -- Every money aggregate reads this instead of `transactions`: an unsplit
 -- transaction yields one row, a split one yields a row per part.
 CREATE VIEW txn_allocations AS
@@ -105,7 +123,10 @@ SELECT t.id                                        AS txn_id,
        t.merchant_key                              AS merchant_key,
        COALESCE(s.category_id, t.category_id)      AS category_id,
        COALESCE(s.amount_cents, t.amount_cents)    AS amount_cents,
-       CASE WHEN s.id IS NULL THEN 0 ELSE 1 END    AS is_split
+       CASE WHEN s.id IS NULL THEN 0 ELSE 1 END    AS is_split,
+       CASE WHEN EXISTS (SELECT 1 FROM transfer_links l
+                         WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)
+            THEN 1 ELSE 0 END                      AS is_transfer
 FROM transactions t
 LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
 
@@ -161,6 +182,37 @@ MIGRATIONS: list[tuple[int, str]] = [
            COALESCE(s.category_id, t.category_id)   AS category_id,
            COALESCE(s.amount_cents, t.amount_cents) AS amount_cents,
            CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS is_split
+    FROM transactions t
+    LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
+    """),
+    (3, """
+    CREATE TABLE transfer_links (
+        id INTEGER PRIMARY KEY,
+        out_txn_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+        in_txn_id INTEGER NOT NULL UNIQUE REFERENCES transactions(id) ON DELETE CASCADE,
+        source TEXT NOT NULL DEFAULT 'auto' CHECK (source IN ('auto','manual')),
+        created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE transfer_dismissals (
+        out_txn_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        in_txn_id INTEGER NOT NULL REFERENCES transactions(id) ON DELETE CASCADE,
+        PRIMARY KEY (out_txn_id, in_txn_id)
+    );
+
+    DROP VIEW IF EXISTS txn_allocations;
+    CREATE VIEW txn_allocations AS
+    SELECT t.id                                     AS txn_id,
+           t.account_id                             AS account_id,
+           t.date                                   AS date,
+           t.description                            AS description,
+           t.merchant_key                           AS merchant_key,
+           COALESCE(s.category_id, t.category_id)   AS category_id,
+           COALESCE(s.amount_cents, t.amount_cents) AS amount_cents,
+           CASE WHEN s.id IS NULL THEN 0 ELSE 1 END AS is_split,
+           CASE WHEN EXISTS (SELECT 1 FROM transfer_links l
+                             WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)
+                THEN 1 ELSE 0 END                   AS is_transfer
     FROM transactions t
     LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
     """),

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount with context %}
+{% block title %}Transfers{% endblock %}
+{% block content %}
+
+<h1>Transfers between your accounts</h1>
+<p class="small muted">Money moved from one of your accounts to another — savings to
+checking, or paying a credit card — is not income and not spending. When both sides
+are matched, the pair is kept out of budgets and insights automatically.</p>
+
+{% if request.query_params.get('m') %}
+<div class="msg-box">{{ request.query_params.get('m') }}</div>
+{% endif %}
+
+<form method="post" action="/transfers/scan">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="banner">
+    <div class="grow">{{ linked_count }} matched pair{{ 's' if linked_count != 1 }}.</div>
+    <button class="btn small" type="submit">Scan for more</button>
+  </div>
+</form>
+
+{% if suggestions %}
+<div class="card" style="border-left:4px solid var(--warning)">
+  <h2>Possible transfers ({{ suggestions|length }})</h2>
+  <p class="small muted" style="margin-top:-4px">Same amount, opposite direction, in two
+  different accounts. Confirm the ones that really are one movement.</p>
+</div>
+
+{% set shown_groups = [] %}
+{% for c in suggestions %}
+{% set group_n = group_sizes.get(c.group_key, 1) %}
+{% if group_n > 1 and c.group_key not in shown_groups %}
+{% set _ = shown_groups.append(c.group_key) %}
+<div class="card" style="border-left:4px solid var(--accent)">
+  <p class="small" style="margin:0 0 8px">
+    This looks like a recurring move — <strong>{{ group_n }} pairs</strong> match
+    “{{ c.out_txn.description|truncate(28) }} → {{ c.in_txn.description|truncate(28) }}”.</p>
+  <div class="actions" style="margin-top:0">
+    <form method="post" action="/transfers/link-group" style="flex:1">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="group_key" value="{{ c.group_key }}">
+      <button class="btn block" type="submit">Link all {{ group_n }}</button>
+    </form>
+    <form method="post" action="/transfers/link-group" style="flex:1">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="group_key" value="{{ c.group_key }}">
+      <input type="hidden" name="action" value="dismiss">
+      <button class="btn ghost block" type="submit">Dismiss all</button>
+    </form>
+  </div>
+</div>
+{% endif %}
+<div class="card">
+  <div class="spread">
+    <strong>{{ currency }}{{ c.amount_cents|money }}</strong>
+    <span class="chip">{{ c.why }}</span>
+  </div>
+  <div class="transfer-pair">
+    <div class="transfer-side">
+      <div class="small muted">out · {{ c.out_txn.account_name }}</div>
+      <div><a href="/transactions/{{ c.out_txn.id }}?back=/transfers">{{ c.out_txn.description }}</a></div>
+      <div class="small muted">{{ c.out_txn.date }}</div>
+    </div>
+    <div class="transfer-arrow" aria-hidden="true">→</div>
+    <div class="transfer-side">
+      <div class="small muted">in · {{ c.in_txn.account_name }}</div>
+      <div><a href="/transactions/{{ c.in_txn.id }}?back=/transfers">{{ c.in_txn.description }}</a></div>
+      <div class="small muted">{{ c.in_txn.date }}</div>
+    </div>
+  </div>
+  <div class="actions">
+    <form method="post" action="/transfers/link" style="flex:1">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="out_txn_id" value="{{ c.out_txn.id }}">
+      <input type="hidden" name="in_txn_id" value="{{ c.in_txn.id }}">
+      <button class="btn block" type="submit">Yes, one transfer</button>
+    </form>
+    <form method="post" action="/transfers/dismiss" style="flex:1">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="out_txn_id" value="{{ c.out_txn.id }}">
+      <input type="hidden" name="in_txn_id" value="{{ c.in_txn.id }}">
+      <button class="btn ghost block" type="submit">Not a transfer</button>
+    </form>
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{% if linked %}
+<div class="card">
+  <h2>Matched pairs</h2>
+  {% for l in linked %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ l.out_account }} → {{ l.in_account }}</div>
+      <div class="meta">{{ l.out_date }} · {{ l.out_desc|truncate(34) }} → {{ l.in_desc|truncate(34) }}
+        {% if l.source == 'auto' %}· <span class="chip">auto</span>{% endif %}</div>
+    </div>
+    <div class="amt">{{ currency }}{{ l.amount_cents|money }}</div>
+    <form method="post" action="/transfers/{{ l.id }}/unlink" style="flex-shrink:0">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn small ghost" type="submit" title="Unlink">✕</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% elif not suggestions %}
+<div class="card"><p class="muted">No transfers matched yet. Import statements from
+both accounts and the pairs will be found automatically.</p></div>
+{% endif %}
+
+{% endblock %}

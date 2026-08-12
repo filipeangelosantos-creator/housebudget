@@ -16,18 +16,120 @@
 </div>
 {% endfor %}
 
+{% if unmatched %}
+<div class="banner warn">
+  <div class="grow"><strong>{{ unmatched|length }} transfer{{ 's' if unmatched|length != 1 }}</strong>
+  with no matching other side ({{ currency }}{{ (unmatched|sum(attribute='amount_cents'))|abs|money }}).
+  If that's a card payment, the card's own statement may be missing — its spending
+  wouldn't be counted anywhere.</div>
+  <a class="btn small" href="/transfers">Check</a>
+</div>
+{% endif %}
+
+{# --- Spending pace: the most actionable mid-month view --- #}
 <div class="card chart-card">
-  <h2>Cashflow — last 12 months</h2>
+  <h2>Spending pace</h2>
+  <div class="legend">
+    <span><span class="sw s1"></span>{{ month_label[:3] }}</span>
+    <span><span class="sw s2"></span>{{ prev_month_label[:3] }}</span>
+    {% if pace.budget %}<span><span class="sw ref"></span>Budget pace</span>{% endif %}
+  </div>
+  {{ pace_svg|safe }}
+  <table class="tbl" style="margin-top:8px">
+    <tr><td>Spent by day {{ pace.elapsed }}</td>
+      <td class="num"><strong>{{ currency }}{{ pace.spent|money }}</strong></td></tr>
+    <tr><td>Same point last month</td>
+      <td class="num">{{ currency }}{{ pace.prev_same_day|money }}
+        {% if pace.prev_same_day %}
+        <span class="{{ 'neg' if pace.spent > pace.prev_same_day else 'pos' }}">
+          ({{ '+' if pace.spent > pace.prev_same_day }}{{ ((pace.spent - pace.prev_same_day) * 100 // pace.prev_same_day) }}%)</span>
+        {% endif %}</td></tr>
+    {% if pace.budget %}
+    <tr><td>Budget pace by now</td><td class="num">{{ currency }}{{ pace.on_pace|money }}</td></tr>
+    <tr><td>On track to finish at</td>
+      <td class="num {{ 'neg' if pace.projected > pace.budget else 'pos' }}">
+        {{ currency }}{{ pace.projected|money }} of {{ currency }}{{ pace.budget|money }}</td></tr>
+    {% endif %}
+  </table>
+</div>
+
+{# --- Surplus / deficit timeline --- #}
+<div class="card chart-card">
+  <h2>Surplus &amp; deficit — 12 months</h2>
+  <div class="legend">
+    <span><span class="sw s1"></span>Kept</span>
+    <span><span class="sw crit"></span>Overspent</span>
+  </div>
+  {{ net_svg|safe }}
+  {% set positives = nets|selectattr('net', 'gt', 0)|list %}
+  <p class="small muted">
+    {{ positives|length }} of {{ nets|length }} months ended with money left over.
+    {% if summary.savings_rate is not none %}
+    This month you kept {{ summary.savings_rate }}% of income ({{ plain(summary.net) }}).
+    {% endif %}
+  </p>
+</div>
+
+{# --- Cashflow --- #}
+<div class="card chart-card">
+  <h2>Income vs spending — 12 months</h2>
   <div class="legend">
     <span><span class="sw income"></span>Income</span>
     <span><span class="sw spent"></span>Spending</span>
   </div>
   {{ cashflow_svg|safe }}
-  {% if summary.savings_rate is not none %}
-  <p class="small muted">This month you kept {{ summary.savings_rate }}% of income
-  ({{ plain(summary.net) }}).</p>
-  {% endif %}
 </div>
+
+{# --- Where the money goes, over time --- #}
+{% if composition.series %}
+<div class="card chart-card">
+  <h2>Where it goes — 12 months</h2>
+  {{ stacked_svg|safe }}
+  <div class="legend-grid">
+    {% for s in composition.series %}
+    <span class="legend-item">
+      <span class="sw s{{ loop.index0 % 7 + 1 }}"></span>
+      <span class="legend-name">{{ s.name }}</span>
+      <span class="muted legend-val">{{ currency }}{{ s.monthly[-1]|money }}</span>
+    </span>
+    {% endfor %}
+  </div>
+  <p class="small muted">Each bar is one month; the figure beside each category is
+  {{ month_label }}{% if is_current_month %} so far — the month is still in progress{% endif %}.</p>
+</div>
+{% endif %}
+
+{# --- Movers --- #}
+{% if movers %}
+<div class="card">
+  <h2>Biggest changes vs 3-month average</h2>
+  {% for m in movers %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ m.category }}</div>
+      <div class="meta">usually {{ currency }}{{ m.average|money }}</div>
+    </div>
+    <div class="amt {{ 'neg' if m.change > 0 else 'pos' }}">
+      {{ '+' if m.change > 0 }}{{ plain(m.change) }}
+      <span class="small muted">({{ '+' if m.pct_change > 0 }}{{ m.pct_change }}%)</span>
+    </div>
+  </div>
+  {% endfor %}
+  <p class="small muted">Red means you spent more than usual, green less.</p>
+</div>
+{% endif %}
+
+{% if yoy %}
+<div class="card">
+  <h2>vs a year ago</h2>
+  <table class="tbl">
+    <tr><td>Spending {{ month_label }}</td><td class="num">{{ currency }}{{ yoy.spent_now|money }}</td></tr>
+    <tr><td>Spending {{ yoy.last_year }}</td><td class="num">{{ currency }}{{ yoy.spent_then|money }}</td></tr>
+    <tr><td>Change</td><td class="num {{ 'neg' if yoy.spent_pct > 0 else 'pos' }}">
+      {{ '+' if yoy.spent_pct > 0 }}{{ yoy.spent_pct }}%</td></tr>
+  </table>
+</div>
+{% endif %}
 
 {% if trends %}
 <div class="card chart-card">
@@ -91,6 +193,9 @@
 {% if not merchants and not largest %}
 <div class="card"><p class="muted">No spending data for {{ month_label }} yet —
 <a href="/import">import a statement</a> to see insights.</p></div>
+{% elif months_with_data < 3 %}
+<p class="footer-note">Trends and comparisons get more useful once a few months
+of statements are imported.</p>
 {% endif %}
 
 {% endblock %}

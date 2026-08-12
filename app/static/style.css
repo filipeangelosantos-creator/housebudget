@@ -22,6 +22,15 @@
   --critical: #d03b3b;
   --danger-text: #b02a2a;
   --track: #edece7;
+  /* Categorical series, fixed order — validated for CVD separation and
+     contrast against the light surface. Never cycled or reordered. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-5: #e87ba4;
+  --series-6: #008300;
+  --series-7: #4a3aa7;
   --radius: 12px;
   --nav-h: 58px;
 }
@@ -48,6 +57,14 @@
     --critical: #d03b3b;
     --danger-text: #e66767;
     --track: #262624;
+    /* Same hues, stepped for the dark surface — not an automatic flip. */
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --series-5: #d55181;
+    --series-6: #008300;
+    --series-7: #9085e9;
   }
 }
 
@@ -239,6 +256,21 @@ button.linklike { background: none; border: none; color: var(--accent);
 .chart-card svg { width: 100%; height: auto; display: block; }
 .bar-income { fill: var(--income); }
 .bar-spent { fill: var(--spent); }
+.bar-surplus { fill: var(--series-1); }
+.bar-deficit { fill: var(--critical); }
+.series-1 { fill: var(--series-1); }
+.series-2 { fill: var(--series-2); }
+.series-3 { fill: var(--series-3); }
+.series-4 { fill: var(--series-4); }
+.series-5 { fill: var(--series-5); }
+.series-6 { fill: var(--series-6); }
+.series-7 { fill: var(--series-7); }
+.line-this { fill: none; stroke: var(--series-1); stroke-width: 2;
+             stroke-linecap: round; stroke-linejoin: round; }
+.line-prev { fill: none; stroke: var(--series-2); stroke-width: 2;
+             stroke-linecap: round; stroke-linejoin: round; opacity: 0.75; }
+.dot-this { fill: var(--series-1); stroke: var(--surface); stroke-width: 2; }
+.chart-ref { stroke: var(--muted); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .spark-bar { fill: var(--spark); opacity: 0.55; }
 .spark-bar.current { fill: var(--spark-current); opacity: 1; }
 .chart-grid { stroke: var(--grid); stroke-width: 1; }
@@ -250,6 +282,25 @@ button.linklike { background: none; border: none; color: var(--accent);
               margin-right: 6px; }
 .legend .sw.income { background: var(--income); }
 .legend .sw.spent { background: var(--spent); }
+.legend .sw.crit { background: var(--critical); }
+.legend .sw.ref { background: transparent; border-top: 2px dashed var(--muted);
+                  border-radius: 0; height: 0; margin-bottom: 3px; }
+.sw.s1 { background: var(--series-1); }
+.sw.s2 { background: var(--series-2); }
+.sw.s3 { background: var(--series-3); }
+.sw.s4 { background: var(--series-4); }
+.sw.s5 { background: var(--series-5); }
+.sw.s6 { background: var(--series-6); }
+.sw.s7 { background: var(--series-7); }
+.legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+               font-size: 13px; color: var(--ink-2); margin-top: 8px; }
+.legend-item { display: flex; align-items: center; min-width: 0; }
+.legend-item .sw { display: inline-block; width: 10px; height: 10px;
+                   border-radius: 3px; margin-right: 6px; flex-shrink: 0; }
+.legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.legend-val { margin-left: auto; padding-left: 8px; white-space: nowrap;
+              font-variant-numeric: tabular-nums; }
+@media (max-width: 420px) { .legend-grid { grid-template-columns: 1fr; } }
 .trend-row { display: flex; align-items: center; gap: 12px; padding: 7px 0;
              border-bottom: 1px solid var(--grid); }
 .trend-row:last-child { border-bottom: none; }
@@ -282,6 +333,12 @@ button.linklike { background: none; border: none; color: var(--accent);
 .split-line { display: flex; justify-content: space-between; gap: 10px;
               font-size: 14px; padding: 4px 0; }
 .split-line .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* --- transfer pairs ------------------------------------------------------ */
+.transfer-pair { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
+.transfer-side { flex: 1; min-width: 0; font-size: 14px; }
+.transfer-side > div { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.transfer-arrow { color: var(--muted); font-size: 18px; flex-shrink: 0; }
 
 /* --- login -------------------------------------------------------------- */
 .auth-wrap { max-width: 380px; margin: 8vh auto; padding: 0 16px; }

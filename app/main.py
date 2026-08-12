@@ -14,7 +14,7 @@ from . import config, db
 from .deps import RequiresLogin
 from .routes import (accounts_routes, auth_routes, budgets_routes, dashboard,
                      imports, insights_routes, rules_routes, settings_routes,
-                     transactions)
+                     transactions, transfers_routes)
 from .services.seed import seed_defaults
 
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -69,5 +69,6 @@ async def security_headers(request: Request, call_next):
 
 
 for module in (auth_routes, dashboard, transactions, imports, budgets_routes,
-               insights_routes, rules_routes, accounts_routes, settings_routes):
+               insights_routes, rules_routes, accounts_routes, settings_routes,
+               transfers_routes):
     app.include_router(module.router)
