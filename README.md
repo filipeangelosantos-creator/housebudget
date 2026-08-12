@@ -57,20 +57,47 @@ you own and can back up with one tap.
 - **Your data, always** — export everything to CSV or download the SQLite
   database from Settings.
 
-## Quick start (try it locally)
+## Run it on your own computer
 
-Requires Python 3.11+.
+Requires Python 3.11+. Nothing else to install — the script sets itself up.
 
 ```bash
-./run.sh                    # creates .venv, installs deps, starts the app
-# open http://localhost:8000 — the first visit walks you through creating
-# your two logins. Try the files in samples/ to see the import flow.
+git clone <this repo> && cd housebudget
+./run.sh
 ```
 
-## Deploy on your own domain (with password + HTTPS)
+Open **http://localhost:8000**. The first visit walks you through creating your
+two logins. The files in `samples/` let you try the import flow before using
+real statements.
 
-You need a small Linux server (any €4–6/month VPS — Hetzner, DigitalOcean,
-Lightsail, …) with Docker installed, and a domain or subdomain.
+`./run.sh` prints where your data is kept every time it starts.
+
+**To use it from your phones on the home wi-fi**, start it with
+`HOST=0.0.0.0 ./run.sh` and open the address it prints (something like
+`http://192.168.1.20:8000`). That's plain HTTP with no certificate — fine on
+your own network, but don't do it on public wi-fi, and use the Docker + Caddy
+setup below if you want it reachable from outside the house.
+
+### Where your data lives
+
+Everything — the database, the uploaded statement files and the cookie-signing
+key — goes in **`~/.housebudget/`**, deliberately *outside* the code folder.
+That means you can delete the project folder, re-clone it, or run
+`git clean -xdf` in it without touching your financial history. Nothing
+financial is ever committed to git; there's a test asserting it.
+
+Put it somewhere else with `HB_DATA_DIR=/path/to/somewhere ./run.sh`.
+
+**Back it up.** Settings → *Download database backup* gives you a single file
+containing everything; restoring is dropping it back as
+`~/.housebudget/budget.db`. Copying that file somewhere safe now and then is
+the whole backup strategy.
+
+## Later: put it on your own domain (with HTTPS)
+
+When you want it reachable from anywhere, not just the house. You need a small
+Linux server (any €4–6/month VPS — Hetzner, DigitalOcean, Lightsail, …) with
+Docker installed, and a domain or subdomain.
 
 1. **Point DNS at the server**: create an `A` record, e.g.
    `budget.yourdomain.com → <server IP>`.
@@ -86,9 +113,12 @@ Lightsail, …) with Docker installed, and a domain or subdomain.
    Caddy fetches and renews the HTTPS certificate automatically. Open
    `https://budget.yourdomain.com`, create your two logins, done.
 
-Everything lives in `./data/` (database, uploaded statements, cookie-signing
-key). **Back that folder up** — or just tap *Download database backup* in
-Settings now and then.
+Data lives in `/srv/housebudget-data` on the host (change it with
+`HB_DATA_PATH` in `.env`), outside the code checkout for the same reason as
+above. **Back that directory up**, or use *Download database backup* in
+Settings.
+
+Moving from your laptop to a server later is just copying `budget.db` across.
 
 Alternative without opening ports: run it at home and put
 [Tailscale](https://tailscale.com) or a Cloudflare Tunnel in front — the app
