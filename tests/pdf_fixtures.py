@@ -263,6 +263,184 @@ def card_with_reference_numbers_and_no_spaces() -> bytes:
     return buf.getvalue()
 
 
+def columnar_additions_subtractions() -> bytes:
+    """HSBC-shaped: DEPOSITS/ADDITIONS before WITHDRAWALS/SUBTRACTIONS (credit
+    column first!), a BALANCE column, the date printed once per day with later
+    same-day rows inheriting it, and OPENING/ENDING BALANCE rows to ignore.
+
+    Expected: deposits +150.00 +3,207.04, withdrawals -250.00 -1,347.04
+    -> net +1,760.00 exactly.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(50, H - 55, "STATEMENT PERIOD 12/19/25 TO 01/16/26")
+
+    y = H - 95
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(50, y, "DATE")
+    c.drawString(110, y, "DESCRIPTION OF TRANSACTIONS")
+    _draw_right(c, 385, y, "ADDITIONS")
+    _draw_right(c, 475, y, "SUBTRACTIONS")
+    _draw_right(c, 545, y, "BALANCE")
+
+    c.setFont("Helvetica", 8)
+    rows = [
+        ("12/19/25", "OPENING BALANCE", None, None, "28,407.83"),
+        ("12/22/25", "ACH DEPOSIT FROM EMPLOYER-PAYROLL", "3,207.04", None, "31,614.87"),
+        ("",         "ACH PAYMENT TO SOMEBANK SV WEBXFR-TRANSFER", None, "250.00", "31,364.87"),
+        ("12/23/25", "ACH PAYMENT TO LENDER APY F1-AUTO PAY", None, "1,347.04", "30,017.83"),
+        ("",         "MOBILE CHECK DEPOSIT", "150.00", None, "30,167.83"),
+        ("01/16/26", "ENDING BALANCE", None, None, "30,167.83"),
+    ]
+    y -= 16
+    for date, desc, add, sub, bal in rows:
+        if date:
+            c.drawString(50, y, date)
+        c.drawString(110, y, desc)
+        if add:
+            _draw_right(c, 385, y, add)
+        if sub:
+            _draw_right(c, 475, y, sub)
+        _draw_right(c, 545, y, bal)
+        y -= 14
+    c.save()
+    return buf.getvalue()
+
+
+def sectioned_checking() -> bytes:
+    """Citizens-checking-shaped: sign lives in the section heading, a Daily
+    Balance grid must be skipped, and a totals sidebar must not become rows.
+
+    Expected: withdrawals -114.86 -100.00, deposits +250.00 -> net +35.14.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, H - 55, "TRANSACTION DETAILS FOR CHECKING ACCOUNT")
+
+    y = H - 85
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Withdrawals&Debits**")
+    y -= 14
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(50, y, "Date")
+    c.drawString(95, y, "Amount")
+    c.drawString(160, y, "Description")
+    y -= 13
+    c.setFont("Helvetica", 8)
+    for date, amount, desc in (("02/12", "114.86", "EVERSOURCE WEB_PAY 21061176012226"),
+                               ("02/17", "100.00", "VENMO PAYMENT 1048296050179")):
+        c.drawString(50, y, date)
+        c.drawString(95, y, amount)
+        c.drawString(160, y, desc)
+        y -= 12
+
+    y -= 8
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Deposits&Credits")
+    _draw_right(c, 545, y, "TotalDeposits&Credits")
+    y -= 14
+    c.setFont("Helvetica", 8)
+    c.drawString(50, y, "02/19")
+    c.drawString(95, y, "250.00")
+    c.drawString(160, y, "TRANSFER FROM OTHER BANK P2P")
+    _draw_right(c, 545, y, "+ 250.00")
+    y -= 20
+
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "DailyBalance")
+    y -= 14
+    c.setFont("Helvetica", 8)
+    # three date+balance pairs on one line — the shape that became phantom rows
+    c.drawString(50, y, "02/12")
+    c.drawString(95, y, "1,262.10")
+    c.drawString(200, y, "02/17")
+    c.drawString(245, y, "1,162.10")
+    c.drawString(350, y, "02/19")
+    c.drawString(395, y, "1,412.10")
+    c.save()
+    return buf.getvalue()
+
+
+def card_with_credit_markers(with_sections: bool = True) -> bytes:
+    """April-card-shaped: amounts unsigned, credits flagged by a standalone
+    "(-)" after the figure. With sections, the heading carries the sign and the
+    marker is just noise to strip; without, the marker itself must negate.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, H - 55, "Account Activity")
+    y = H - 85
+
+    if with_sections:
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(50, y, "Payments & Credits")
+        y -= 14
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(50, y, "Trans Date")
+    c.drawString(110, y, "Post Date")
+    c.drawString(170, y, "Transaction Description")
+    _draw_right(c, 520, y, "Amount")
+    y -= 13
+    c.setFont("Helvetica", 8)
+    for tdate, pdate, desc, amount in (
+            ("04/14", "04/14", "PAYMENT RECEIVED", "537.76"),
+            ("04/04", "04/06", "TJMAXX #0569 BROOKLINE MA", "10.61")):
+        c.drawString(50, y, tdate)
+        c.drawString(110, y, pdate)
+        c.drawString(170, y, desc)
+        _draw_right(c, 520, y, amount)
+        c.drawString(524, y, "(-)")
+        y -= 12
+
+    if with_sections:
+        y -= 8
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(50, y, "Purchases")
+        y -= 14
+    c.setFont("Helvetica", 8)
+    for tdate, pdate, desc, amount in (
+            ("03/27", "03/30", "TJMAXX #0098 SUNRISE FL", "186.11"),
+            ("04/02", "04/03", "STAR MARKET AUBURNDALE MA", "45.00")):
+        c.drawString(50, y, tdate)
+        c.drawString(110, y, pdate)
+        c.drawString(170, y, desc)
+        _draw_right(c, 520, y, amount)
+        y -= 12
+    c.setFont("Helvetica", 7)
+    c.drawString(50, 60, "Statement 04/16/2026")
+    c.save()
+    return buf.getvalue()
+
+
+def dated_with_posting_asterisk() -> bytes:
+    """Amex-shaped: the payment row's date carries a posting marker, 06/03/26*,
+    which must not stop the row being recognised."""
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(50, H - 55, "Payments and Credits")
+    y = H - 85
+    c.setFont("Helvetica-Bold", 8)
+    c.drawString(50, y, "Date")
+    c.drawString(140, y, "Description")
+    _draw_right(c, 520, y, "Amount")
+    y -= 14
+    c.setFont("Helvetica", 8)
+    rows = [("06/03/26*", "AUTOPAY PAYMENT RECEIVED - THANK YOU", "-$537.22"),
+            ("05/18/26", "MEMBERSHIP CREDIT", "-$12.95"),
+            ("06/01/26", "SOME STORE CHARGE", "$45.00")]
+    for date, desc, amount in rows:
+        c.drawString(50, y, date)
+        c.drawString(140, y, desc)
+        _draw_right(c, 520, y, amount)
+        y -= 12
+    c.save()
+    return buf.getvalue()
+
+
 def scanned_like_no_text() -> bytes:
     """A page with no extractable text, standing in for a scanned statement."""
     buf = io.BytesIO()

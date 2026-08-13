@@ -23,8 +23,12 @@ import pdfplumber
 
 # Money on a statement effectively always carries two decimal places. Requiring
 # them is what stops "REF 12345" or an IBAN block being read as an amount.
+# Some cards mark credits with a trailing "(-)" glued to the figure: 537.76(-).
 MONEY_RE = re.compile(
-    r"^[(+\-]?\s*[€$£R]?\$?\s*\d[\d\s.,]*[.,]\d{2}\s*[)\-]?$", re.IGNORECASE)
+    r"^[(+\-]?\s*[€$£R]?\$?\s*\d[\d\s.,]*[.,]\d{2}\s*([)\-]|\(-\))?$", re.IGNORECASE)
+
+# Date/posting markers some banks glue onto cells: 06/03/26* or 12.95†
+CELL_MARKERS = "*†‡⧫§"
 
 MONTHS = ("jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec|"
           "fev|abr|mai|ago|set|out|dez|gen|mag|giu|lug|ott|dic|"
@@ -59,8 +63,74 @@ def _is_reference(text: str) -> bool:
     return text.isdigit() and len(text) >= MIN_REFERENCE_DIGITS
 
 
+# --- statement sections -------------------------------------------------------
+# Many statements carry the sign structurally rather than printing it: the rows
+# under "Withdrawals & Debits" are money out, under "Deposits & Credits" money
+# in, and a "Daily Balance" grid is not transactions at all. Headings are
+# matched with spacing/punctuation removed, since these PDFs often have none.
+
+_BALANCE_SECTIONS = ("dailybalance", "dailyendingbalance", "balancesummary",
+                     "averagedailybalance", "balanceworksheet",
+                     "dailybalancedetail")
+_CREDIT_SECTIONS = ("depositsandcredits", "depositscredits",
+                    "depositsandothercredits", "depositsandadditions",
+                    "depositsotheradditions", "paymentsandcredits",
+                    "paymentsandothercredits", "paymentsreceived",
+                    "paymentsamount", "creditsamount", "deposits", "payments",
+                    "credits", "refunds")
+_DEBIT_SECTIONS = ("withdrawalsanddebits", "withdrawalsdebits",
+                   "withdrawalsandothersubtractions", "otherwithdrawalsdebits",
+                   "otherwithdrawals", "withdrawals",
+                   "purchasesandadjustments", "purchases", "feescharged",
+                   "interestcharged", "checkspaid", "electronicwithdrawals",
+                   "cardpurchases", "newcharges", "fees")
+
+# Rows that live in a transaction table but are not transactions.
+_NON_TXN_DESC = ("openingbalance", "closingbalance", "beginningbalance",
+                 "endingbalance", "previousbalance", "newbalance", "total",
+                 "continued", "subtotal")
+
+_NORMALIZE = re.compile(r"[^a-z]+")
+
+
+def _norm(text: str) -> str:
+    return _NORMALIZE.sub("", text.lower())
+
+
+def _section_for(line_text: str) -> str | None:
+    """'debit' / 'credit' / 'balance' when this line is a section heading."""
+    n = _norm(line_text)
+    if not n or len(n) > 60:
+        return None
+    for keys, kind in ((_BALANCE_SECTIONS, "balance"),
+                       (_CREDIT_SECTIONS, "credit"),
+                       (_DEBIT_SECTIONS, "debit")):
+        if any(k in n for k in keys):
+            return kind
+    return None
+
+
+def _is_non_txn_desc(desc: str) -> bool:
+    n = _norm(desc)
+    return any(n.startswith(k) for k in _NON_TXN_DESC)
+
+
 def is_money(text: str) -> bool:
-    return bool(MONEY_RE.match(text.strip()))
+    return bool(MONEY_RE.match(text.strip().strip(CELL_MARKERS)))
+
+
+def money_cell(text: str) -> str:
+    """Normalize a money word for the grid: '537.76(-)' -> '-537.76'."""
+    text = text.strip().strip(CELL_MARKERS).strip()
+    if text.endswith("(-)"):
+        text = text[:-3].strip()
+        if not text.startswith("-"):
+            text = "-" + text
+    return text
+
+
+def _clean_token(token: str) -> str:
+    return token.strip().strip(CELL_MARKERS)
 
 
 def _match_date(tokens: list[str]) -> int:
@@ -68,14 +138,18 @@ def _match_date(tokens: list[str]) -> int:
     for n in (3, 2, 1):
         if len(tokens) < n:
             continue
-        joined = " ".join(tokens[:n]).strip().rstrip(",")
+        joined = " ".join(_clean_token(t) for t in tokens[:n]).strip().rstrip(",")
         if any(p.match(joined) for p in DATE_PATTERNS):
             return n
     return 0
 
 
+_SHORT_YEAR_DATE = re.compile(r"^\d{1,2}[-/.]\d{1,2}[-/.]\d{2}$")
+
+
 def _has_year(text: str) -> bool:
-    return bool(YEAR_RE.search(text))
+    """'12/19/25' has a year just as much as '12/19/2025' does."""
+    return bool(YEAR_RE.search(text)) or bool(_SHORT_YEAR_DATE.match(text.strip()))
 
 
 def _group_lines(words: list[dict]) -> list[list[dict]]:
@@ -105,9 +179,12 @@ def _nearest(centers: list[float], value: float) -> int:
 
 
 def _split_line(line: list[dict]):
-    """Split one line into (dates, reference, description words, money words)."""
+    """Split a line into (dates, reference, description words, money words,
+    sign markers). A standalone "(-)" is a credit marker, not description."""
     money = [w for w in line if is_money(w["text"])]
     rest = [w for w in line if w not in money]
+    markers = [w for w in rest if w["text"].strip() in ("(-)", "(+)")]
+    rest = [w for w in rest if w not in markers]
 
     dates: list[str] = []
     idx = 0
@@ -122,7 +199,7 @@ def _split_line(line: list[dict]):
     if dates and idx < len(rest) and _is_reference(rest[idx]["text"]):
         reference = rest[idx]["text"]
         idx += 1
-    return dates, reference, rest[idx:], money
+    return dates, reference, rest[idx:], money, markers
 
 
 def _document_year(pages_text: str) -> str | None:
@@ -179,18 +256,28 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
             "This PDF has no selectable text — it looks like a scan or photo. "
             "Ask your bank for a CSV, Excel or OFX export instead.")
 
-    # Pass 1: find the transaction lines and where the amount columns sit.
+    # Pass 1: find dated transaction lines and where the amount columns sit.
+    # Section headings ("Withdrawals & Debits", "Daily Balance") are tracked as
+    # we go — they carry the sign, or mark rows that are not transactions.
     parsed: list = []
     money_edges: list[float] = []
     first_txn: tuple[int, float] | None = None
+    section: str | None = None
     for page_no, lines in enumerate(pages):
         for line in lines:
-            dates, reference, desc_words, money = _split_line(line)
-            if dates and money:
-                parsed.append((page_no, dates, reference, desc_words, money))
-                money_edges.extend(w["x1"] for w in money)
-                if first_txn is None:
-                    first_txn = (page_no, line[0]["top"])
+            dates, reference, desc_words, money, _markers = _split_line(line)
+            if not money:
+                text = " ".join(w["text"] for w in line)
+                kind = _section_for(text)
+                if kind:
+                    section = kind
+                continue
+            if dates:
+                parsed.append((page_no, dates, reference, desc_words, money, section))
+                if section != "balance":
+                    money_edges.extend(w["x1"] for w in money)
+                    if first_txn is None:
+                        first_txn = (page_no, line[0]["top"])
 
     if not parsed:
         raise ValueError(
@@ -202,33 +289,90 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     has_reference = any(p[2] for p in parsed)
     year = _document_year(" ".join(all_text))
 
+    # A document whose amounts carry no signs at all (no leading minus, no
+    # parentheses, no (-) marker) encodes direction structurally — via its
+    # sections or debit/credit columns. Only then may a section flip a sign;
+    # printed signs are never overridden.
+    all_money = [money_cell(w["text"]) for p in parsed for w in p[4]]
+    unsigned_doc = all_money and not any(
+        m.startswith("-") or m.endswith("-") for m in all_money)
+
     # Pass 2: build the grid, folding wrapped description lines into their row.
     rows: list[list[str]] = []
     row_index_by_line: dict[tuple[int, int], int] = {}
+    section = None
+    last_date_cells: list[str] | None = None
     for page_no, lines in enumerate(pages):
         for line_no, line in enumerate(lines):
-            dates, reference, desc_words, money = _split_line(line)
-            if not (dates and money):
+            dates, reference, desc_words, money, markers = _split_line(line)
+            if not money:
+                text = " ".join(w["text"] for w in line)
+                kind = _section_for(text)
+                if kind:
+                    section = kind
+                    last_date_cells = None
                 continue
-            cells = list(dates[:n_dates]) + [""] * (n_dates - len(dates[:n_dates]))
-            if year and cells and cells[0] and not _has_year(cells[0]):
-                cells[0] = f"{cells[0]} {year}"
+            if section == "balance":
+                continue
+            description = " ".join(w["text"] for w in desc_words).strip()
+            if _is_non_txn_desc(description):
+                last_date_cells = None
+                continue
+
+            if dates:
+                date_cells = [_clean_token(d) for d in dates[:n_dates]]
+                date_cells += [""] * (n_dates - len(date_cells))
+                if year and date_cells[0] and not _has_year(date_cells[0]):
+                    date_cells[0] = f"{date_cells[0]} {year}"
+                last_date_cells = date_cells
+            else:
+                # Statements like HSBC's print the date once per day; the rest
+                # of that day's rows inherit it. Only lines whose money sits in
+                # the established columns qualify — anything else is a summary.
+                if (last_date_cells is None or not description
+                        or not all(_near_any(columns, w["x1"]) for w in money)):
+                    continue
+                date_cells = list(last_date_cells)
+
+            cells = list(date_cells)
             if has_reference:
                 cells.append(reference)
-            description = " ".join(w["text"] for w in desc_words).strip()
             cells.append(description)
+            # A "(-)" marker beside the figure negates it — but only when no
+            # section already supplies the sign, so nothing is negated twice.
+            marked_negative: set[int] = set()
+            if markers and unsigned_doc and section is None:
+                for marker in markers:
+                    if marker["text"].strip() != "(-)":
+                        continue
+                    left = [w for w in money if w["x1"] <= marker["x0"] + 1]
+                    if left:
+                        marked_negative.add(id(max(left, key=lambda w: w["x1"])))
             amounts = [""] * len(columns)
             for w in money:
-                amounts[_nearest(columns, w["x1"])] = w["text"].strip()
+                value = money_cell(w["text"])
+                negate = (unsigned_doc and section == "debit") or id(w) in marked_negative
+                if negate and not value.startswith("-"):
+                    value = "-" + value
+                amounts[_nearest(columns, w["x1"])] = value
             cells.extend(amounts)
             row_index_by_line[(page_no, line_no)] = len(rows)
             rows.append(cells)
+
+    if not rows:
+        raise ValueError(
+            "No transaction rows found in this PDF. If it is a statement, "
+            "the layout may need a tweak — or use a CSV/Excel export instead.")
 
     desc_index = n_dates + (1 if has_reference else 0)
     _attach_wrapped_descriptions(pages, rows, row_index_by_line, desc_index)
 
     header = _build_header(pages, columns, n_dates, has_reference, first_txn)
     return ([header] + rows) if header else rows
+
+
+def _near_any(centers: list[float], value: float) -> bool:
+    return bool(centers) and min(abs(c - value) for c in centers) <= COLUMN_TOLERANCE
 
 
 def _attach_wrapped_descriptions(pages, rows, row_index_by_line, desc_index) -> None:
@@ -252,11 +396,16 @@ def _attach_wrapped_descriptions(pages, rows, row_index_by_line, desc_index) -> 
             if line[0]["top"] - last_top > WRAP_MAX_GAP:
                 last_row = None          # too far below to belong to that row
                 continue
-            dates, _reference, desc_words, money = _split_line(line)
+            dates, _reference, desc_words, money, _markers = _split_line(line)
             if dates or money or not desc_words:
                 last_row = None          # a summary or a new block, not a wrap
                 continue
             extra = " ".join(w["text"] for w in desc_words).strip()
+            # A section heading or totals line below a transaction is a new
+            # block, never a continuation of the description above it.
+            if _section_for(extra) or _is_non_txn_desc(extra):
+                last_row = None
+                continue
             if extra:
                 rows[last_row][desc_index] = (
                     rows[last_row][desc_index] + " " + extra).strip()

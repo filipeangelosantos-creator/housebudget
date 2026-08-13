@@ -28,9 +28,10 @@ HEADER_KEYWORDS = {
                "transaction amount", "amt", "betrag"],
     "debit": ["debit", "debito", "débito", "withdrawal", "withdrawals",
               "money out", "paid out", "charge", "cargo", "saida", "saída",
-              "debe", "out"],
+              "debe", "out", "subtractions", "subtraction"],
     "credit": ["credit", "credito", "crédito", "deposit", "deposits",
-               "money in", "paid in", "abono", "entrada", "haber", "in"],
+               "money in", "paid in", "abono", "entrada", "haber", "in",
+               "additions", "addition"],
     "balance": ["balance", "saldo", "running balance", "solde",
                 "saldo contabilistico", "saldo disponivel"],
     # An identifier, not a description and definitely not an amount.

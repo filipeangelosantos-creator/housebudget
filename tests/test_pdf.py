@@ -116,6 +116,91 @@ def test_terms_and_conditions_page_is_not_mistaken_for_the_table_header():
     assert "Date" in " ".join(header) and "Amount" in " ".join(header)
 
 
+def test_columnar_bank_with_credit_column_first():
+    """HSBC shape: ADDITIONS (money in) left of SUBTRACTIONS. The column
+    headings must set the signs — assuming first-money-column-is-debit
+    inverted every transaction on this layout."""
+    st, rows = parsed(F.columnar_additions_subtractions())
+    assert st.mapping.credit_col is not None and st.mapping.debit_col is not None
+    assert st.mapping.credit_col < st.mapping.debit_col
+    amounts = [r.amount_cents for r in rows]
+    assert amounts == [320704, -25000, -134704, 15000]
+    assert sum(amounts) == 176000
+
+
+def test_columnar_bank_dates_inherited_within_a_day():
+    """The date is printed once per day; later rows that day carry none and
+    must inherit it rather than be dropped."""
+    _, rows = parsed(F.columnar_additions_subtractions())
+    assert len(rows) == 4                                  # none silently lost
+    assert rows[0].date == rows[1].date == date(2025, 12, 22)
+    assert rows[2].date == rows[3].date == date(2025, 12, 23)
+
+
+def test_opening_and_ending_balance_rows_are_not_transactions():
+    _, rows = parsed(F.columnar_additions_subtractions())
+    descs = " ".join(r.description for r in rows)
+    assert "OPENING" not in descs and "ENDING" not in descs
+
+
+def test_two_digit_year_dates_do_not_get_another_year_appended():
+    _, rows = parsed(F.columnar_additions_subtractions())
+    assert rows[0].date == date(2025, 12, 22)              # not 2026, not mangled
+
+
+def test_sectioned_checking_signs_come_from_headings():
+    st, rows = parsed(F.sectioned_checking())
+    by_desc = {r.description.split()[0]: r.amount_cents for r in rows}
+    assert by_desc["EVERSOURCE"] == -11486                 # withdrawals section
+    assert by_desc["VENMO"] == -10000
+    assert by_desc["TRANSFER"] == 25000                    # deposits section
+    assert sum(r.amount_cents for r in rows) == 3514
+
+
+def test_daily_balance_grid_is_not_transactions():
+    _, rows = parsed(F.sectioned_checking())
+    assert len(rows) == 3                                  # not 3 + balance pairs
+    amounts = {r.amount_cents for r in rows}
+    assert 126210 not in amounts and -126210 not in amounts
+
+
+def test_credit_marker_with_sections_strips_marker_and_uses_section_sign():
+    st, rows = parsed(F.card_with_credit_markers(with_sections=True))
+    assert all("(-)" not in r.description for r in rows)
+    by_desc = {r.description: r.amount_cents for r in rows}
+    assert by_desc["PAYMENT RECEIVED"] == 53776            # credits section
+    assert by_desc["TJMAXX #0569 BROOKLINE MA"] == 1061    # a return: money in
+    assert by_desc["TJMAXX #0098 SUNRISE FL"] == -18611    # purchases section
+    assert by_desc["STAR MARKET AUBURNDALE MA"] == -4500
+
+
+def test_credit_marker_without_sections_negates_its_row():
+    st, rows = parsed(F.card_with_credit_markers(with_sections=False))
+    by_desc = {r.description: r.amount_cents for r in rows}
+    assert by_desc["PAYMENT RECEIVED"] == -53776           # marker negates
+    assert by_desc["TJMAXX #0569 BROOKLINE MA"] == -1061
+    assert by_desc["TJMAXX #0098 SUNRISE FL"] == 18611     # unmarked untouched
+    assert all("(-)" not in d for d in by_desc)
+
+
+def test_posting_asterisk_on_date_still_recognised():
+    """A date like 06/03/26* must not stop the payment row being captured —
+    on a real statement this silently dropped the whole payment."""
+    _, rows = parsed(F.dated_with_posting_asterisk())
+    assert len(rows) == 3
+    assert rows[0].date == date(2026, 6, 3)
+    assert rows[0].amount_cents == -53722
+
+
+def test_printed_signs_are_never_overridden_by_sections():
+    """A signed document (intrinsic minuses) keeps its printed signs even when
+    section headings are present."""
+    _, rows = parsed(F.dated_with_posting_asterisk())
+    by = {r.description[:8]: r.amount_cents for r in rows}
+    assert by["AUTOPAY "] == -53722                        # stays negative
+    assert by["SOME STO"] == 4500                          # stays positive
+
+
 def test_scanned_pdf_gives_an_actionable_message():
     with pytest.raises(ValueError, match="scan or photo"):
         load_statement("scan.pdf", F.scanned_like_no_text())
