@@ -116,6 +116,11 @@ body {
 .nav a svg { width: 22px; height: 22px; }
 .nav a.active { color: var(--accent); }
 @media (min-width: 800px) {
+  /* The nav leaves the bottom of the screen and stacks under the top bar, so
+     anything sticky has two bars to clear here, not one. Without this every
+     sticky element pins at 45px — underneath the nav, which has the higher
+     z-index — and is simply invisible on a desktop window. */
+  :root { --top-h: 95px; }          /* nav sits at 49px and is 46px tall */
   .nav { position: sticky; top: 49px; bottom: auto; border-top: none;
          border-bottom: 1px solid var(--border); height: 46px; }
   .nav a { flex-direction: row; gap: 7px; font-size: 13.5px; }
