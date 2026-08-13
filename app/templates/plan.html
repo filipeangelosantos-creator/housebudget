@@ -16,7 +16,7 @@ the guessing stops for that category.</p>
   {% for s in declared %}
   <div class="txn">
     <div class="mid">
-      <div class="desc">{{ s.category }}
+      <div class="desc">{{ s.title }}
         <span class="chip">{{ s.label }}</span>
         {%- if s.kind == 'income' %} <span class="chip">income</span>{% endif %}</div>
       <div class="meta">
@@ -26,7 +26,7 @@ the guessing stops for that category.</p>
         {%- if s.note %} · {{ s.note }}{% endif %}</div>
     </div>
     <div class="amt">
-      <a class="btn small ghost" href="/plan?category={{ s.category_id }}">Edit</a>
+      <a class="btn small ghost" href="/plan?edit={{ s.id }}">Edit</a>
     </div>
   </div>
   {% endfor %}
@@ -59,10 +59,18 @@ the guessing stops for that category.</p>
   <h2>{{ 'Change' if editing else 'Add' }} a schedule</h2>
   <form method="post" action="/plan/save">
     <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="schedule_id" value="{{ editing.id if editing else '' }}">
     <label class="f">Category</label>
     {{ category_select('category_id', categories,
                        selected=editing.category_id if editing else preset_category,
                        include_blank=False) }}
+
+    <label class="f">Name (optional)</label>
+    <input type="text" name="name" placeholder="e.g. mine, my partner's, the water bill"
+           value="{{ editing.name if editing else '' }}">
+    <p class="small muted">A category can hold several of these. Two people paid
+    out of one Salary line only add up while they happen to land together —
+    give each its own line and the calendar does the rest.</p>
 
     <label class="f">How often</label>
     <select name="cadence">
@@ -87,7 +95,7 @@ the guessing stops for that category.</p>
     <input type="text" name="note" value="{{ editing.note if editing else '' }}">
 
     <div class="actions">
-      <button class="btn" type="submit">Save schedule</button>
+      <button class="btn" type="submit">{{ 'Save changes' if editing else 'Add schedule' }}</button>
       {% if editing %}
       <a class="btn ghost" href="/plan">Cancel</a>
       {% endif %}
@@ -95,9 +103,9 @@ the guessing stops for that category.</p>
   </form>
   {% if editing %}
   <form method="post" action="/plan/remove" style="margin-top:10px"
-        data-confirm="Stop treating {{ editing.category }} as scheduled?">
+        data-confirm="Remove the schedule for {{ editing.title }}?">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="category_id" value="{{ editing.category_id }}">
+    <input type="hidden" name="schedule_id" value="{{ editing.id }}">
     <button class="btn danger block" type="submit">Remove this schedule —
       go back to working it out from statements</button>
   </form>

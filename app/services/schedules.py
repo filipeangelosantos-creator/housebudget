@@ -48,9 +48,11 @@ def _clamp(year: int, month: int, day: int) -> date:
 
 @dataclass
 class Schedule:
+    id: int
     category_id: int
     category: str
     kind: str                 # 'income' or 'expense', from the category's group
+    name: str                 # whose pay, or which of the category's bills
     cadence: str
     amount_cents: int         # per occurrence
     anchor: date
@@ -59,6 +61,11 @@ class Schedule:
     @property
     def label(self) -> str:
         return label(self.cadence)
+
+    @property
+    def title(self) -> str:
+        """What to call this line. Two salaries need telling apart; one doesn't."""
+        return f"{self.category} — {self.name}" if self.name else self.category
 
     def dates_in(self, month: str) -> list[date]:
         """Every date this schedule lands on during `month`."""
@@ -126,45 +133,61 @@ class Schedule:
 
 
 def _row_to_schedule(r) -> Schedule:
-    return Schedule(category_id=r["category_id"], category=r["name"],
-                    kind=r["kind"], cadence=r["cadence"],
-                    amount_cents=r["amount_cents"],
-                    anchor=date.fromisoformat(r["anchor_date"]),
-                    note=r["note"])
+    return Schedule(id=r["id"], category_id=r["category_id"],
+                    category=r["category_name"], kind=r["kind"], name=r["name"],
+                    cadence=r["cadence"], amount_cents=r["amount_cents"],
+                    anchor=date.fromisoformat(r["anchor_date"]), note=r["note"])
 
 
-_SELECT = """SELECT s.*, c.name, g.kind FROM schedules s
+_SELECT = """SELECT s.*, c.name AS category_name, g.kind FROM schedules s
              JOIN categories c ON c.id = s.category_id
              JOIN category_groups g ON g.id = c.group_id"""
 
 
 def all_schedules(conn) -> list[Schedule]:
     return [_row_to_schedule(r) for r in conn.execute(
-        _SELECT + " ORDER BY g.kind DESC, c.sort_order, c.id").fetchall()]
+        _SELECT + " ORDER BY g.kind DESC, c.sort_order, c.id, s.id").fetchall()]
 
 
-def by_category(conn) -> dict[int, Schedule]:
-    return {s.category_id: s for s in all_schedules(conn)}
+def by_category(conn) -> dict[int, list[Schedule]]:
+    """Many per category: two people paid out of one Salary line, or a category
+    holding both a monthly bill and a yearly one."""
+    out: dict[int, list[Schedule]] = {}
+    for s in all_schedules(conn):
+        out.setdefault(s.category_id, []).append(s)
+    return out
 
 
-def get(conn, category_id: int) -> Schedule | None:
-    row = conn.execute(_SELECT + " WHERE s.category_id = ?",
-                       (category_id,)).fetchone()
+def for_category(conn, category_id: int) -> list[Schedule]:
+    return [_row_to_schedule(r) for r in conn.execute(
+        _SELECT + " WHERE s.category_id = ? ORDER BY s.id",
+        (category_id,)).fetchall()]
+
+
+def get(conn, schedule_id: int) -> Schedule | None:
+    row = conn.execute(_SELECT + " WHERE s.id = ?", (schedule_id,)).fetchone()
     return _row_to_schedule(row) if row else None
 
 
-def set_schedule(conn, category_id: int, cadence: str, amount_cents: int,
-                 anchor: str, note: str = "") -> None:
+def save(conn, category_id: int, cadence: str, amount_cents: int, anchor: str,
+         name: str = "", note: str = "", schedule_id: int | None = None) -> int:
+    """Add a line, or change one. Returns its id."""
     if cadence not in CADENCES:
         raise ValueError(f"unknown cadence: {cadence}")
-    conn.execute(
-        "INSERT INTO schedules (category_id, cadence, amount_cents, anchor_date, "
-        "note, created_at) VALUES (?, ?, ?, ?, ?, ?) "
-        "ON CONFLICT(category_id) DO UPDATE SET cadence = excluded.cadence, "
-        "amount_cents = excluded.amount_cents, anchor_date = excluded.anchor_date, "
-        "note = excluded.note",
-        (category_id, cadence, abs(amount_cents), anchor, note.strip(), utcnow()))
+    values = (category_id, name.strip(), cadence, abs(amount_cents), anchor,
+              note.strip())
+    if schedule_id:
+        conn.execute(
+            "UPDATE schedules SET category_id = ?, name = ?, cadence = ?, "
+            "amount_cents = ?, anchor_date = ?, note = ? WHERE id = ?",
+            values + (schedule_id,))
+        return schedule_id
+    cur = conn.execute(
+        "INSERT INTO schedules (category_id, name, cadence, amount_cents, "
+        "anchor_date, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        values + (utcnow(),))
+    return cur.lastrowid
 
 
-def clear(conn, category_id: int) -> None:
-    conn.execute("DELETE FROM schedules WHERE category_id = ?", (category_id,))
+def clear(conn, schedule_id: int) -> None:
+    conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))

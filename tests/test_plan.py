@@ -22,10 +22,11 @@ def signed_in(web):
     return web
 
 
-def declare(conn, name, cadence, cents, anchor, note=""):
-    schedules.set_schedule(conn, category(conn, name), cadence, cents, anchor, note)
+def declare(conn, cat_name, cadence, cents, anchor, name="", note=""):
+    sid = schedules.save(conn, category(conn, cat_name), cadence, cents, anchor,
+                         name=name, note=note)
     conn.commit()
-    return schedules.get(conn, category(conn, name))
+    return schedules.get(conn, sid)
 
 
 # --- when a schedule says something lands -------------------------------------
@@ -273,8 +274,10 @@ def test_confirming_a_suggestion_makes_it_a_schedule(signed_in):
         "anchor_date": "2026-08-14", "note": "city water"})
 
     conn = open_db()
-    s = schedules.get(conn, water)
+    lines = schedules.for_category(conn, water)
     conn.close()
+    assert len(lines) == 1
+    s = lines[0]
     assert (s.cadence, s.amount_cents, s.note) == ("quarterly", 18500, "city water")
 
     r = signed_in.get("/plan")
@@ -285,17 +288,18 @@ def test_confirming_a_suggestion_makes_it_a_schedule(signed_in):
 def test_a_schedule_can_be_removed_and_the_guessing_comes_back(signed_in):
     conn = open_db()
     water = category(conn, "Water")
-    schedules.set_schedule(conn, water, "quarterly", 18500, "2026-08-14")
+    sid = schedules.save(conn, water, "quarterly", 18500, "2026-08-14")
     conn.commit()
     conn.close()
 
-    page = signed_in.get(f"/plan?category={water}")
+    page = signed_in.get(f"/plan?edit={sid}")
     assert "Remove this schedule" in page.text
     signed_in.post("/plan/remove", data={
-        "csrf": get_csrf(page.text), "category_id": str(water)})
+        "csrf": get_csrf(page.text), "schedule_id": str(sid)})
 
     conn = open_db()
-    assert schedules.get(conn, water) is None
+    assert schedules.get(conn, sid) is None
+    assert schedules.for_category(conn, water) == []
     conn.close()
 
 
@@ -309,7 +313,7 @@ def test_a_nonsense_cadence_is_refused(signed_in):
         "cadence": "whenever", "amount": "10", "anchor_date": "2026-08-14"})
 
     conn = open_db()
-    assert schedules.get(conn, water) is None
+    assert schedules.for_category(conn, water) == []
     conn.close()
 
 
@@ -325,3 +329,98 @@ def test_the_budget_page_links_a_category_to_its_schedule(signed_in):
     r = signed_in.get("/budgets?month=2026-08")
     assert "not every month?" in r.text
     assert "/plan?category=" in r.text
+
+
+# --- more than one line per category ------------------------------------------
+
+def test_two_salaries_are_two_lines_not_one_added_up(conn):
+    """Reported: two people paid out of one Salary category. They land on the
+    same day this year, so summing them works — right up until one is paid
+    monthly and the other fortnightly, and then it never works again."""
+    mine = declare(conn, "Salary", "biweekly", 210000, "2026-08-07", name="mine")
+    theirs = declare(conn, "Salary", "monthly", 300000, "2026-08-25",
+                     name="my partner's")
+    assert mine.id != theirs.id
+    assert mine.title == "Salary — mine"
+
+    got = insights.expected_income(conn, "2026-08")
+    assert got["total"] == 210000 * 2 + 300000
+    assert sorted(e["stream"].name for e in got["detail"]) == [
+        "Salary — mine", "Salary — my partner's"]
+
+    # October catches a third fortnightly payday; the monthly one is unmoved
+    october = insights.expected_income(conn, "2026-10")
+    assert october["total"] == 210000 * 3 + 300000
+
+
+def test_each_line_keeps_its_own_calendar(conn):
+    declare(conn, "Salary", "biweekly", 210000, "2026-08-07", name="mine")
+    declare(conn, "Salary", "monthly", 300000, "2026-08-25", name="theirs")
+    detail = {e["stream"].name: e["paydays"]
+              for e in insights.expected_income(conn, "2026-09")["detail"]}
+    assert detail["Salary — mine"] == [date(2026, 9, 4), date(2026, 9, 18)]
+    assert detail["Salary — theirs"] == [date(2026, 9, 25)]
+
+
+def test_a_category_can_hold_two_bills_at_different_cadences(conn):
+    declare(conn, "Car Insurance", "semiannual", 74000, "2026-02-01", name="car one")
+    declare(conn, "Car Insurance", "yearly", 36000, "2026-04-10", name="car two")
+
+    bills = [b for b in insights.periodic_bills(conn, "2026-08")
+             if b.category == "Car Insurance"]
+    assert len(bills) == 2
+    assert sorted(b.merchant for b in bills) == ["Car Insurance — car one",
+                                                 "Car Insurance — car two"]
+
+
+def test_the_set_aside_for_a_category_adds_up_its_lines(conn):
+    """One figure to budget, even though it is two bills."""
+    declare(conn, "Car Insurance", "semiannual", 74000, "2026-02-01", name="one")
+    declare(conn, "Car Insurance", "yearly", 36000, "2026-04-10", name="two")
+
+    note = next(n for n in insights.budget_review(conn, "2026-08")
+                if n.category == "Car Insurance")
+    assert note.kind == "periodic"
+    assert note.suggested == 12333 + 3000        # 740/6 + 360/12
+    assert note.line_count == 2
+
+
+def test_a_line_can_be_changed_without_touching_its_neighbour(conn):
+    mine = declare(conn, "Salary", "biweekly", 210000, "2026-08-07", name="mine")
+    theirs = declare(conn, "Salary", "monthly", 300000, "2026-08-25", name="theirs")
+
+    schedules.save(conn, mine.category_id, "biweekly", 220000, "2026-08-07",
+                   name="mine", schedule_id=mine.id)
+    conn.commit()
+
+    lines = {s.name: s for s in schedules.for_category(conn, mine.category_id)}
+    assert lines["mine"].amount_cents == 220000
+    assert lines["theirs"].amount_cents == 300000
+
+
+def test_removing_one_line_leaves_the_rest(conn):
+    mine = declare(conn, "Salary", "biweekly", 210000, "2026-08-07", name="mine")
+    declare(conn, "Salary", "monthly", 300000, "2026-08-25", name="theirs")
+    schedules.clear(conn, mine.id)
+    conn.commit()
+    assert [s.name for s in schedules.for_category(conn, mine.category_id)] == ["theirs"]
+
+
+def test_an_unnamed_line_is_just_the_category(conn):
+    s = declare(conn, "Water", "quarterly", 18500, "2026-08-14")
+    assert s.title == "Water"
+
+
+def test_the_plan_page_lists_every_line_separately(signed_in):
+    conn = open_db()
+    schedules.save(conn, category(conn, "Salary"), "biweekly", 210000,
+                   "2026-08-07", name="mine")
+    schedules.save(conn, category(conn, "Salary"), "monthly", 300000,
+                   "2026-08-25", name="my partner's")
+    conn.commit()
+    conn.close()
+
+    r = signed_in.get("/plan")
+    assert "Salary — mine" in r.text
+    assert "Salary — my partner&#39;s" in r.text or "Salary — my partner's" in r.text
+    assert r.text.count("/plan?edit=") == 2

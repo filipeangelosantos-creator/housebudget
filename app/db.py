@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 SCHEMA = """
 CREATE TABLE users (
@@ -168,14 +168,21 @@ CREATE TABLE settings (
 -- A mortgage on the 1st, pay every other Friday, water every quarter: the app
 -- can infer these from enough statements, but only you know them for certain,
 -- and a wrong guess shows up as a category swinging for no reason.
+--
+-- Many per category, because one is a coincidence: two salaries land on the
+-- same day this year and on different cadences the next, and a household with
+-- one row for "Salary" can only describe that by adding the two up.
 CREATE TABLE schedules (
-    category_id  INTEGER PRIMARY KEY REFERENCES categories(id) ON DELETE CASCADE,
+    id           INTEGER PRIMARY KEY,
+    category_id  INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+    name         TEXT NOT NULL DEFAULT '',     -- whose, or which bill
     cadence      TEXT NOT NULL,
     amount_cents INTEGER NOT NULL DEFAULT 0,   -- per occurrence, not per month
     anchor_date  TEXT NOT NULL,                -- one date it lands on
     note         TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL
 );
+CREATE INDEX idx_schedules_category ON schedules(category_id);
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
@@ -255,6 +262,25 @@ MIGRATIONS: list[tuple[int, str]] = [
         note         TEXT NOT NULL DEFAULT '',
         created_at   TEXT NOT NULL
     );
+    """),
+    (7, """
+    ALTER TABLE schedules RENAME TO schedules_v6;
+    CREATE TABLE schedules (
+        id           INTEGER PRIMARY KEY,
+        category_id  INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+        name         TEXT NOT NULL DEFAULT '',
+        cadence      TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        anchor_date  TEXT NOT NULL,
+        note         TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL
+    );
+    INSERT INTO schedules (category_id, name, cadence, amount_cents, anchor_date,
+                           note, created_at)
+        SELECT category_id, '', cadence, amount_cents, anchor_date, note, created_at
+        FROM schedules_v6;
+    DROP TABLE schedules_v6;
+    CREATE INDEX idx_schedules_category ON schedules(category_id);
     """),
 ]
 

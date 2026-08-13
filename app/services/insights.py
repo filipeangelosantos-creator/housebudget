@@ -361,7 +361,7 @@ def expected_income(conn, month: str, today: date | None = None) -> dict:
     streams = [s for s in pay_streams(conn, month) if s.category not in claimed]
     for s in declared:
         streams.append(PayStream(
-            name=s.category, category=s.category, cadence=s.cadence,
+            name=s.title, category=s.category, cadence=s.cadence,
             typical_cents=s.amount_cents, last_date=s.anchor, days_of_month=[],
             recent=[], low_cents=s.amount_cents, high_cents=s.amount_cents,
             declared_dates=s.dates_in(month)))
@@ -638,7 +638,7 @@ def _declared_bills(conn, today: date) -> list[PeriodicBill]:
                 break
             last = following
         out.append(PeriodicBill(
-            merchant=s.category, category=s.category, category_id=s.category_id,
+            merchant=s.title, category=s.category, category_id=s.category_id,
             cadence=s.label, months_per=sched.months_per(s.cadence),
             typical_cents=s.amount_cents, last_date=last,
             next_due=s.next_after(today), times_seen=0, declared=True))
@@ -742,6 +742,7 @@ class BudgetNote:
     typical: int = 0           # median month's spend over the window
     suggested: int = 0         # what the monthly budget would have to be
     bill: PeriodicBill | None = None
+    line_count: int = 1        # how many scheduled lines the category holds
 
     @property
     def over_by(self) -> int:
@@ -786,8 +787,16 @@ def budget_review(conn, month: str) -> list[BudgetNote]:
     window = months_back(month, REVIEW_MONTHS)
     budgets_now, _ = effective_budgets(conn, month)
     history = _monthly_spend_by_category(conn, window)
-    bills = {b.category_id: b for b in periodic_bills(conn, month)
-             if b.category_id is not None}
+    # A category can hold several: two salaries, or a monthly bill beside a
+    # yearly one. The one shown is the soonest due; the set-aside is all of them.
+    from . import schedules as sched
+    declared_lines = sched.by_category(conn)
+    bills: dict[int, PeriodicBill] = {}
+    for b in periodic_bills(conn, month):
+        if b.category_id is None:
+            continue
+        if b.category_id not in bills or b.next_due < bills[b.category_id].next_due:
+            bills[b.category_id] = b
 
     names = {r["id"]: r["name"] for r in conn.execute(
         "SELECT c.id, c.name FROM categories c "
@@ -799,7 +808,11 @@ def budget_review(conn, month: str) -> list[BudgetNote]:
         months_seen = history.get(cat_id, {})
         actual = months_seen.get(month, 0)
         budget = budgets_now.get(cat_id, 0)
-        if not actual and not budget and not months_seen:
+        # A category you have scheduled but never spent in is precisely the one
+        # that needs a budget: the bill is coming whether or not it has been
+        # paid out of this account before.
+        if not actual and not budget and not months_seen \
+                and cat_id not in declared_lines:
             continue
         # The month in progress is not evidence of a typical month yet.
         past = [months_seen.get(m, 0) for m in window if m != month]
@@ -813,10 +826,13 @@ def budget_review(conn, month: str) -> list[BudgetNote]:
             if per_month and bill.monthly_cents < per_month * BILL_DOMINATES:
                 bill = None
         if bill is not None:
+            lines = declared_lines.get(cat_id, [])
+            set_aside = (sum(l.monthly_cents for l in lines) if lines
+                         else bill.monthly_cents)
             notes.append(BudgetNote(
                 kind="periodic", category=name, category_id=cat_id, budget=budget,
-                actual=actual, typical=typical, suggested=bill.monthly_cents,
-                bill=bill))
+                actual=actual, typical=typical, suggested=set_aside, bill=bill,
+                line_count=max(1, len(lines))))
         elif budget and actual > budget and actual - budget >= MATERIAL_CENTS:
             notes.append(BudgetNote(
                 kind="over", category=name, category_id=cat_id, budget=budget,
