@@ -145,12 +145,115 @@ def classify(rules: list[dict], normalized: str, mkey: str) -> int | None:
 
 def create_rule(conn, pattern: str, category_id: int, match_type: str = "contains",
                 priority: int = 10, source: str = "learned") -> int:
+    """Teach a rule, or point an identical one at the new category.
+
+    Ticking "always file this here" used to add a rule every time, so filing
+    the same shop twice left two identical rules and the second could never
+    fire. Same pattern, same match type, same origin means it is the same rule
+    — changing your mind about the category rewrites it.
+    """
+    pattern = pattern.strip()
+    existing = conn.execute(
+        "SELECT id FROM rules WHERE pattern = ? COLLATE NOCASE AND match_type = ? "
+        "AND source = ? ORDER BY priority, id LIMIT 1",
+        (pattern, match_type, source)).fetchone()
+    if existing:
+        conn.execute("UPDATE rules SET category_id = ?, pattern = ? WHERE id = ?",
+                     (category_id, pattern, existing["id"]))
+        return existing["id"]
     cur = conn.execute(
         "INSERT INTO rules (pattern, match_type, category_id, priority, source, created_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        (pattern.strip(), match_type, category_id, priority, source, utcnow()),
+        (pattern, match_type, category_id, priority, source, utcnow()),
     )
     return cur.lastrowid
+
+
+def duplicate_groups(conn) -> list[dict]:
+    """Rules that share a pattern and match type, so only the first can fire.
+
+    Ordering mirrors load_rules exactly — otherwise this would name a survivor
+    the engine doesn't actually use.
+    """
+    rows = conn.execute(
+        "SELECT r.id, r.pattern, r.match_type, r.category_id, r.priority, r.source, "
+        "       c.name AS category_name "
+        "FROM rules r JOIN categories c ON c.id = r.category_id "
+        "ORDER BY r.priority ASC, LENGTH(r.pattern) DESC, r.id ASC").fetchall()
+    grouped: dict[tuple, list] = {}
+    for r in rows:
+        grouped.setdefault((r["pattern"].upper(), r["match_type"]), []).append(dict(r))
+
+    groups = []
+    for (pattern, match_type), members in grouped.items():
+        if len(members) < 2:
+            continue
+        keep, drop = members[0], members[1:]
+        # Judged per rule, not per group: one set can hold both an exact copy
+        # and a rule naming another category, and only the first is pure noise.
+        redundant = [d for d in drop if d["category_id"] == keep["category_id"]]
+        conflicting = [d for d in drop if d["category_id"] != keep["category_id"]]
+        groups.append({
+            "pattern": pattern, "match_type": match_type,
+            "keep": keep, "drop": drop,
+            "redundant": redundant, "conflicting_rules": conflicting,
+            "conflicting": bool(conflicting),
+        })
+    groups.sort(key=lambda g: (not g["conflicting"], g["pattern"]))
+    return groups
+
+
+def _delete_rules(conn, ids: list[int], survivor_id: int) -> None:
+    """Drop rules, moving anything they filed onto the rule that stays.
+
+    Without this the transactions keep their category but lose the link, and
+    show up as filed by a rule that no longer exists.
+    """
+    if not ids:
+        return
+    marks = ",".join("?" * len(ids))
+    conn.execute(f"UPDATE transactions SET rule_id = ? WHERE rule_id IN ({marks})",
+                 [survivor_id] + ids)
+    conn.execute(f"DELETE FROM rules WHERE id IN ({marks})", ids)
+
+
+def remove_duplicate_rules(conn, include_conflicting: bool = False) -> int:
+    """Delete rules that can never fire because an identical one precedes them.
+
+    Behaviour is unchanged either way — these rules are already unreachable.
+    Conflicting ones are left alone by default because each is a category
+    somebody once chose, and that is worth seeing before it disappears.
+    """
+    removed = 0
+    for group in duplicate_groups(conn):
+        doomed = list(group["redundant"])
+        if include_conflicting:
+            doomed += group["conflicting_rules"]
+        ids = [d["id"] for d in doomed]
+        _delete_rules(conn, ids, group["keep"]["id"])
+        removed += len(ids)
+    conn.commit()
+    return removed
+
+
+def keep_only(conn, rule_id: int) -> int:
+    """Within one duplicate group, keep this rule and drop the rest."""
+    for group in duplicate_groups(conn):
+        ids = [m["id"] for m in [group["keep"], *group["drop"]]]
+        if rule_id not in ids:
+            continue
+        losers = [i for i in ids if i != rule_id]
+        _delete_rules(conn, losers, rule_id)
+        conn.commit()
+        return len(losers)
+    return 0
+
+
+def rule_usage(conn) -> dict[int, int]:
+    """How many transactions each rule currently accounts for, in one pass."""
+    return {r["rule_id"]: r["n"] for r in conn.execute(
+        "SELECT rule_id, COUNT(*) AS n FROM transactions "
+        "WHERE rule_id IS NOT NULL GROUP BY rule_id")}
 
 
 def apply_rules_to_uncategorized(conn, only_rule_id: int | None = None) -> int:

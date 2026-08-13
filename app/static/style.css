@@ -205,6 +205,8 @@ a { color: var(--accent); }
 .chip.warn { background: color-mix(in srgb, var(--critical) 20%, var(--surface));
              color: var(--ink); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.dupe-group { border-top: 1px solid var(--border); padding: 8px 0 4px; }
+.dupe-row { padding: 3px 0; gap: 10px; }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);

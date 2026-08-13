@@ -151,3 +151,36 @@ def test_v3_database_upgrades_to_v4():
     assert row["category_id"] == 1              # the category survived
     assert (row["classified_by"], row["rule_id"]) == ("user", None)
     conn.close()
+
+
+def test_duplicate_rules_are_cleared_on_the_way_to_v5():
+    """Teaching the same rule twice used to add a copy. Only the first of any
+    identical set is ever consulted, so clearing the rest is invisible."""
+    from app.services import classify
+
+    conn = db.connect(":memory:")
+    conn.executescript(V1_SCHEMA)
+    for target, sql in db.MIGRATIONS:
+        if target > 4:
+            break
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 4")
+    conn.execute("INSERT INTO category_groups (id, name, kind) VALUES (1, 'Food', 'expense')")
+    conn.execute("INSERT INTO categories (id, group_id, name) VALUES (1, 1, 'Groceries')")
+    conn.execute("INSERT INTO categories (id, group_id, name) VALUES (2, 1, 'Restaurants')")
+    for rid, cat in ((1, 1), (2, 1), (3, 2)):     # two identical, one conflicting
+        conn.execute(
+            "INSERT INTO rules (id, pattern, match_type, category_id, priority, "
+            "source, created_at) VALUES (?, 'LIDL', 'contains', ?, 10, 'learned', 'now')",
+            (rid, cat))
+    conn.commit()
+    before = classify.classify(classify.load_rules(conn), "LIDL LISBOA", "LIDL")
+
+    db.init_db(conn)
+
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    left = [r["id"] for r in conn.execute("SELECT id FROM rules ORDER BY id")]
+    assert left == [1, 3], "the exact copy goes, the other category stays"
+    # and nothing about classification moved
+    assert classify.classify(classify.load_rules(conn), "LIDL LISBOA", "LIDL") == before
+    conn.close()

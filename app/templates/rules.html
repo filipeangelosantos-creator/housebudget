@@ -10,6 +10,105 @@
 category automatically. Lower priority number wins. Rules you teach from the
 review screen appear here as “learned”.</p>
 
+{% if request.query_params.get('m') %}
+<div class="msg-box">{{ request.query_params.get('m') }}</div>
+{% endif %}
+
+{% if redundant > 0 %}
+<form method="post" action="/rules/dedupe">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="banner warn">
+    <div class="grow"><strong>{{ redundant }} duplicate rule{{ 's' if redundant != 1 }}</strong>
+      — same pattern as another rule, so {{ 'it never fires' if redundant == 1 else 'they never fire' }}.
+      Removing {{ 'it' if redundant == 1 else 'them' }} changes nothing.</div>
+    <button class="btn small" type="submit">Remove</button>
+  </div>
+</form>
+{% endif %}
+
+{% if dupes | selectattr('conflicting') | list %}
+<div class="card" style="border-left:4px solid var(--warning)">
+  <h2>Same pattern, different categories</h2>
+  <p class="small muted" style="margin-top:-4px">Only the first of each set is ever
+  used — the others are already dead. Keep the one you want.</p>
+  {% for g in dupes if g.conflicting %}
+  <div class="dupe-group">
+    <div class="small"><code>{{ g.pattern }}</code>
+      {% if g.match_type != 'contains' %}<span class="chip">{{ g.match_type }}</span>{% endif %}</div>
+    {% for r in [g.keep] + g.drop %}
+    <div class="spread dupe-row">
+      <span class="small">{{ r.category_name }}
+        <span class="chip">{{ r.source }}</span>
+        <span class="muted">priority {{ r.priority }}</span>
+        {% if loop.first %}<span class="chip">in use</span>
+        {% else %}<span class="chip uncat">never fires</span>{% endif %}
+      </span>
+      {% if not loop.first %}
+      <form method="post" action="/rules/{{ r.id }}/keep">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn small ghost" type="submit">Use this one</button>
+      </form>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if uncat > 0 %}
+<form method="post" action="/rules/rerun">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="banner">
+    <div class="grow">{{ uncat }} uncategorized transaction{{ 's' if uncat != 1 }}.</div>
+    <button class="btn small" type="submit">Re-run all rules</button>
+  </div>
+</form>
+{% endif %}
+
+<form method="get" action="/rules">
+  <div class="filters">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search pattern or category…"
+           enterkeyhint="search" autocomplete="off">
+    <select name="source" data-autosubmit>
+      <option value="">All rules</option>
+      <option value="learned" {{ 'selected' if source == 'learned' }}>Taught by you</option>
+      <option value="user" {{ 'selected' if source == 'user' }}>Added by hand</option>
+      <option value="seed" {{ 'selected' if source == 'seed' }}>Built in</option>
+    </select>
+  </div>
+  <noscript><button class="btn small ghost" type="submit">Search</button></noscript>
+</form>
+
+<div class="card">
+  <h2>{% if q or source %}{{ rules|length }} of {{ total }} rules{% else %}{{ total }} rules{% endif %}</h2>
+  {% if rules %}
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <tr><th>Pattern</th><th>Category</th><th class="num">Used</th><th>Prio</th><th>Source</th><th></th></tr>
+      {% for r in rules %}
+      <tr>
+        <td><code>{{ r.pattern }}</code>{% if r.match_type != 'contains' %} <span class="chip">{{ r.match_type }}</span>{% endif %}</td>
+        <td>{{ r.category_name }}</td>
+        <td class="num">{{ usage.get(r.id, 0) or '—' }}</td>
+        <td class="num">{{ r.priority }}</td>
+        <td><span class="chip">{{ r.source }}</span></td>
+        <td>
+          <form method="post" action="/rules/{{ r.id }}/delete">
+            <input type="hidden" name="csrf" value="{{ csrf }}">
+            <button class="btn small ghost" type="submit" title="Delete">✕</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  {% else %}
+  <p class="muted">No rule matches that search.
+    <a href="/rules">Show all {{ total }}</a>.</p>
+  {% endif %}
+</div>
+
 <div class="card">
   <h2>Add rule</h2>
   <form method="post" action="/rules/add">
@@ -42,39 +141,6 @@ review screen appear here as “learned”.</p>
     </div>
     <div class="actions"><button class="btn" type="submit">Add rule</button></div>
   </form>
-</div>
-
-{% if uncat > 0 %}
-<form method="post" action="/rules/rerun">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <div class="banner">
-    <div class="grow">{{ uncat }} uncategorized transaction{{ 's' if uncat != 1 }}.</div>
-    <button class="btn small" type="submit">Re-run all rules</button>
-  </div>
-</form>
-{% endif %}
-
-<div class="card">
-  <h2>{{ rules|length }} rules</h2>
-  <div class="tbl-scroll">
-    <table class="tbl">
-      <tr><th>Pattern</th><th>Category</th><th>Prio</th><th>Source</th><th></th></tr>
-      {% for r in rules %}
-      <tr>
-        <td><code>{{ r.pattern }}</code>{% if r.match_type != 'contains' %} <span class="chip">{{ r.match_type }}</span>{% endif %}</td>
-        <td>{{ r.category_name }}</td>
-        <td class="num">{{ r.priority }}</td>
-        <td><span class="chip">{{ r.source }}</span></td>
-        <td>
-          <form method="post" action="/rules/{{ r.id }}/delete">
-            <input type="hidden" name="csrf" value="{{ csrf }}">
-            <button class="btn small ghost" type="submit" title="Delete">✕</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </table>
-  </div>
 </div>
 
 {% endblock %}

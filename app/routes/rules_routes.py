@@ -8,20 +8,57 @@ from ..services import classify
 router = APIRouter()
 
 
+SOURCES = ("seed", "user", "learned")
+
+
 @router.get("/rules")
-def rules_page(request: Request, conn=Depends(get_conn), user=Depends(current_user)):
+def rules_page(request: Request, conn=Depends(get_conn), user=Depends(current_user),
+               q: str = "", source: str = ""):
+    """The rule list, searchable. With a couple of hundred seed rules, finding
+    the one that filed something wrong is the whole job."""
+    where, params = [], []
+    if q.strip():
+        # Matching the category name too: "which rules send things to Fuel?"
+        where.append("(r.pattern LIKE ? OR c.name LIKE ?)")
+        params.extend([f"%{q.strip()}%", f"%{q.strip()}%"])
+    if source in SOURCES:
+        where.append("r.source = ?")
+        params.append(source)
+    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
     rules = conn.execute(
-        "SELECT r.*, c.name AS category_name FROM rules r "
-        "JOIN categories c ON c.id = r.category_id "
-        "ORDER BY r.priority, r.pattern").fetchall()
+        f"SELECT r.*, c.name AS category_name FROM rules r "
+        f"JOIN categories c ON c.id = r.category_id {where_sql} "
+        f"ORDER BY r.priority, r.pattern", params).fetchall()
+    total = conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0]
     categories = conn.execute(
         "SELECT c.id, c.name, g.name AS group_name FROM categories c "
         "JOIN category_groups g ON g.id = c.group_id WHERE c.archived = 0 "
         "ORDER BY g.sort_order, c.sort_order").fetchall()
     uncat = conn.execute(
         "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
+    dupes = classify.duplicate_groups(conn)
     return render(request, conn, "rules.html", rules=rules, categories=categories,
-                  uncat=uncat)
+                  uncat=uncat, q=q, source=source if source in SOURCES else "",
+                  total=total, usage=classify.rule_usage(conn), dupes=dupes,
+                  redundant=sum(len(g["redundant"]) for g in dupes))
+
+
+@router.post("/rules/dedupe", dependencies=[Depends(verify_csrf)])
+def rules_dedupe(request: Request, conn=Depends(get_conn), user=Depends(current_user),
+                 include_conflicting: str = Form("")):
+    n = classify.remove_duplicate_rules(conn, include_conflicting=bool(include_conflicting))
+    return RedirectResponse(
+        f"/rules?m=Removed+{n}+rule{'' if n == 1 else 's'}+that+could+never+fire.",
+        status_code=303)
+
+
+@router.post("/rules/{rule_id}/keep", dependencies=[Depends(verify_csrf)])
+def rules_keep(rule_id: int, request: Request, conn=Depends(get_conn),
+               user=Depends(current_user)):
+    """Resolve one conflicting group by keeping this rule and dropping its twins."""
+    n = classify.keep_only(conn, rule_id)
+    return RedirectResponse(f"/rules?m=Removed+{n}+conflicting+duplicate"
+                            f"{'' if n == 1 else 's'}.", status_code=303)
 
 
 @router.get("/rules/match-count")

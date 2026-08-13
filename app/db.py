@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA = """
 CREATE TABLE users (
@@ -89,6 +89,8 @@ CREATE INDEX idx_txn_date ON transactions(date);
 CREATE INDEX idx_txn_account_date ON transactions(account_id, date);
 CREATE INDEX idx_txn_category ON transactions(category_id);
 CREATE INDEX idx_txn_merchant ON transactions(merchant_key);
+CREATE INDEX idx_txn_classified ON transactions(classified_by);
+CREATE INDEX idx_txn_rule ON transactions(rule_id);
 
 -- One receipt, several budget categories (Costco run = groceries + clothes).
 -- Splits must sum exactly to the transaction amount.
@@ -228,6 +230,9 @@ MIGRATIONS: list[tuple[int, str]] = [
     ALTER TABLE transactions ADD COLUMN rule_id INTEGER REFERENCES rules(id) ON DELETE SET NULL;
     CREATE INDEX idx_txn_classified ON transactions(classified_by);
     """),
+    (5, """
+    CREATE INDEX IF NOT EXISTS idx_txn_rule ON transactions(rule_id);
+    """),
 ]
 
 
@@ -268,6 +273,13 @@ def init_db(conn: sqlite3.Connection) -> None:
         # exactly what you would change to re-file it.
         from .services.classify import label_existing_classifications
         label_existing_classifications(conn)
+    if 5 in crossed:
+        # Teaching the same rule twice used to add a second copy, and only the
+        # first of any identical set is ever consulted. Clearing the copies is
+        # provably invisible: every one of them is already unreachable. Rules
+        # that name a *different* category are left for a human to decide on.
+        from .services.classify import remove_duplicate_rules
+        remove_duplicate_rules(conn)
 
 
 def get_setting(conn, key: str, default: str = "") -> str:
