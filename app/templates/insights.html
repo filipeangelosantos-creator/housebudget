@@ -96,9 +96,10 @@
   {% endfor %}
   <p class="small muted">Together they need
     {{ currency }}{{ bills|sum(attribute='monthly_cents')|money }} a month set aside.
-    These are found by the gap between charges, so the further back your imports
-    go the more of them turn up — a yearly bill can't be spotted until it has
-    been paid twice.</p>
+    Only charges that repeat on a schedule <em>and</em> for about the same amount
+    count — otherwise a shop you happen to visit every few months lands here as a
+    bill. That also means the further back your imports go the more real ones turn
+    up: a yearly bill can't be spotted until it has been paid twice.</p>
 </div>
 {% endif %}
 

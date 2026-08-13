@@ -287,3 +287,113 @@ def test_the_budget_page_says_which_categories_are_not_monthly(signed_in):
     assert "quarterly" in r.text
     assert "set aside" in r.text
     assert "$61.67" in r.text
+
+
+# --- a place you visit is not a bill ------------------------------------------
+
+def visits(conn, days: list[str], amounts: list[int], desc: str, category_name: str):
+    for day, cents in zip(days, amounts):
+        add_txn(conn, 1, day, -cents, desc, category(conn, category_name))
+
+
+def test_a_restaurant_visited_now_and_then_is_not_a_quarterly_bill(conn):
+    """Reported: three burger runs happened to fall about 90 days apart and got
+    filed as a quarterly bill to set money aside for. An interval on its own is
+    not a bill — the amounts have to agree too, and a night out never does."""
+    account(conn)
+    visits(conn, ["2025-12-20", "2026-01-18", "2026-04-15"],
+           [1180, 4260, 1411], "FIVE GUYS MA QSR WALTHAM MA", "Restaurants & Takeout")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "FIVE GUYS" in b.merchant]
+
+
+def test_a_shop_you_drop_into_is_not_a_bill_either(conn):
+    account(conn)
+    visits(conn, ["2025-11-02", "2026-01-29", "2026-04-29"],
+           [850, 4608, 9240], "CVS/PHARMACY NEWTONVILLE MA", "Pharmacy")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "CVS" in b.merchant]
+
+
+def test_charges_the_same_size_but_at_wandering_intervals_are_not_a_bill(conn):
+    """A bill arrives on a schedule. 60 days, then 110, is not one, however
+    tidy the amounts look."""
+    account(conn)
+    visits(conn, ["2025-12-01", "2026-01-30", "2026-05-20"],
+           [8000, 8000, 8000], "SOME SHOP", "Shopping")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "SOME SHOP" in b.merchant]
+
+
+def test_a_few_pounds_on_a_schedule_is_not_worth_setting_aside_for(conn):
+    account(conn)
+    every(conn, "2025-11-14", 91, 4, 900, "TINY CHARGE", "Miscellaneous")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "TINY" in b.merchant]
+
+
+def test_two_sightings_far_apart_need_the_amounts_to_agree(conn):
+    """One gap is not a schedule, so for the long cadences the rest of the
+    evidence has to carry it — two coincidental purchases must not qualify."""
+    account(conn)
+    visits(conn, ["2026-02-01", "2026-08-02"], [74000, 51000],
+           "SOMEWHERE EXPENSIVE", "Shopping")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "EXPENSIVE" in b.merchant]
+
+    # ...and the real thing, charged twice at the same price, still qualifies
+    every(conn, "2026-02-01", 182, 2, 74000, "GEICO AUTO INSURANCE", "Car Insurance")
+    assert [b for b in insights.periodic_bills(conn, "2026-08")
+            if "GEICO" in b.merchant]
+
+
+def test_two_sightings_are_never_enough_for_a_quarterly_claim(conn):
+    """Three sightings of a quarterly bill is only a few months of statements
+    away, so there is no reason to guess from two."""
+    account(conn)
+    every(conn, "2026-05-14", 91, 2, 18500, "CITY WATER DEPT", "Water")
+    assert not [b for b in insights.periodic_bills(conn, "2026-08")
+                if "CITY WATER" in b.merchant]
+
+
+def test_the_real_bill_survives_all_of_that(conn):
+    account(conn)
+    for offset, cents in ((0, 18500), (91, 17900), (182, 19100), (273, 18500)):
+        add_txn(conn, 1, (date(2025, 11, 14) + timedelta(days=offset)).isoformat(),
+                -cents, "CITY WATER DEPT", category(conn, "Water"))
+    bill = next(b for b in insights.periodic_bills(conn, "2026-08")
+                if "CITY WATER" in b.merchant)
+    assert bill.cadence == "quarterly"      # amounts wander a little, as real ones do
+
+
+# --- a bill only speaks for a category it actually is -------------------------
+
+def test_a_bill_that_is_most_of_its_category_speaks_for_it(conn):
+    account(conn)
+    every(conn, "2025-11-14", 91, 4, 18500, "CITY WATER DEPT", "Water")
+    budgets.set_budget(conn, category(conn, "Water"), "2026-08", 6000)
+    conn.commit()
+    assert notes_by_category(conn)["Water"].kind == "periodic"
+
+
+def test_a_bill_that_is_a_small_part_of_its_category_does_not(conn):
+    """Reported: one quarterly item inside Pharmacy turned the whole category
+    "quarterly", and a working "you never budgeted this" check went silent."""
+    account(conn)
+    every(conn, "2025-11-14", 91, 4, 4600, "QUARTERLY PRESCRIPTION", "Pharmacy")
+    monthly(conn, ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"],
+            9000, "CVS PHARMACY", "Pharmacy")
+
+    note = notes_by_category(conn)["Pharmacy"]
+    assert note.kind == "unbudgeted"        # the useful answer, not "quarterly"
+    assert note.suggested >= 9000
+
+
+def test_the_bill_is_still_listed_even_when_it_does_not_speak_for_the_category(conn):
+    """It is a real bill either way — it just isn't the whole category."""
+    account(conn)
+    every(conn, "2025-11-14", 91, 4, 4600, "QUARTERLY PRESCRIPTION", "Pharmacy")
+    monthly(conn, ["2026-03", "2026-04", "2026-05", "2026-06", "2026-07"],
+            9000, "CVS PHARMACY", "Pharmacy")
+    assert [b for b in insights.periodic_bills(conn, "2026-08")
+            if "PRESCRIPTION" in b.merchant]

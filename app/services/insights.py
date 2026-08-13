@@ -546,6 +546,24 @@ CADENCE_BANDS = [
     (320, 400, "yearly", 12),
 ]
 
+# An interval on its own is not a bill. Three visits to a burger place happen
+# to fall 80, 95 and 110 days apart and the middle one is "quarterly" — which
+# is how a restaurant ended up filed as a bill to set money aside for. What
+# separates a bill is that it repeats on a schedule *for the same amount*: the
+# gaps agree with each other and so do the charges.
+GAP_SPREAD = 0.20            # every gap this close to the middle one
+AMOUNT_SPREAD = 0.20         # every charge this close to the typical one
+MIN_BILL_CENTS = 3000        # under this, "set money aside" is noise
+# Two sightings are one gap, and one gap is not a schedule. For the long
+# cadences that is all the evidence there will ever be, so the bar is higher:
+# the amounts have to match closely and the bill has to be worth planning for.
+LONE_GAP_SPREAD = 0.10
+LONE_GAP_MIN_CENTS = 10000
+
+
+def _all_near(values: list[int], centre: int, spread: float) -> bool:
+    return bool(centre) and all(abs(v - centre) <= centre * spread for v in values)
+
 
 @dataclass
 class PeriodicBill:
@@ -624,12 +642,25 @@ def periodic_bills(conn, month: str, lookback: int = 24) -> list[PeriodicBill]:
         if band is None:
             continue
         _, _, label, months_per = band
-        if months_per <= 3 and len(dates) < 3:
+
+        amounts = list(per_day.values())
+        typical = _median_int(amounts)
+        if typical < MIN_BILL_CENTS or not _all_near(amounts, typical, AMOUNT_SPREAD):
             continue
+        if len(dates) == 2:
+            # One gap: no schedule to check, so the rest of the evidence has to
+            # carry it. Never for the short cadences, where three sightings are
+            # only a few months of statements away.
+            if months_per < 6 or typical < LONE_GAP_MIN_CENTS or \
+                    not _all_near(amounts, typical, LONE_GAP_SPREAD):
+                continue
+        elif not _all_near(gaps, gap, GAP_SPREAD):
+            continue
+
         out.append(PeriodicBill(
             merchant=merchant, category=charges[-1]["category"],
             category_id=charges[-1]["category_id"], cadence=label,
-            months_per=months_per, typical_cents=_median_int(list(per_day.values())),
+            months_per=months_per, typical_cents=typical,
             last_date=dates[-1], next_due=dates[-1] + timedelta(days=gap),
             times_seen=len(dates)))
     out.sort(key=lambda b: b.next_due)
@@ -642,6 +673,11 @@ REVIEW_MONTHS = 6          # window the "what you usually spend" figure comes fr
 MATERIAL_CENTS = 2000      # below this, a gap is not worth telling you about
 TOO_LOW = 1.15             # usual spend this far above budget means the budget is low
 TOO_HIGH = 0.70            # ...and this far below means it is holding money idle
+# A periodic bill stops a category being judged month by month, so it had
+# better be most of what that category is. Pharmacy holding a quarterly
+# prescription plus ordinary purchases is still a monthly category, and
+# letting the bill speak for it silenced a budget check that was working.
+BILL_DOMINATES = 0.60
 
 
 @dataclass
@@ -718,7 +754,12 @@ def budget_review(conn, month: str) -> list[BudgetNote]:
         past = [months_seen.get(m, 0) for m in window if m != month]
         typical = _median_int([v for v in past if v > 0]) if any(past) else 0
 
+        # Only a bill that is most of the category speaks for it.
         bill = bills.get(cat_id)
+        if bill is not None:
+            per_month = sum(months_seen.get(m, 0) for m in window) / len(window)
+            if per_month and bill.monthly_cents < per_month * BILL_DOMINATES:
+                bill = None
         if bill is not None:
             notes.append(BudgetNote(
                 kind="periodic", category=name, category_id=cat_id, budget=budget,
