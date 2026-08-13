@@ -33,6 +33,7 @@
   --series-7: #4a3aa7;
   --radius: 12px;
   --nav-h: 58px;
+  --top-h: 45px;   /* sticky top bar, for things that stack under it */
 }
 @media (prefers-color-scheme: dark) {
   :root {
@@ -396,6 +397,17 @@ button.linklike { background: none; border: none; color: var(--accent);
 /* --- misc --------------------------------------------------------------- */
 .pager { display: flex; justify-content: space-between; align-items: center;
          margin: 12px 0; }
+/* Filters stay put while the list scrolls underneath — with a long list you
+   otherwise lose sight of what you filtered to. */
+.filter-bar {
+  position: sticky; top: var(--top-h); z-index: 12;
+  background: var(--page); padding-bottom: 6px;
+  box-shadow: 0 6px 6px -6px rgba(0, 0, 0, 0.10);
+}
+.filter-bar .filters { margin: 8px 0 4px; }
+.filter-bar .result-line { margin: 0; }
+.search-hint { margin: 8px 0 0; }
+.search-hint code { background: var(--track); padding: 0 4px; border-radius: 4px; }
 .filters { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 10px 0; }
 .filters .full { grid-column: 1 / -1; }
 details.adv { margin: 10px 0; }

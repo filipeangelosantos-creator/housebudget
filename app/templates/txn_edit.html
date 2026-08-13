@@ -80,9 +80,10 @@
   </div>
   <p class="small muted">Both sides are kept out of budgets and insights.</p>
   {% elif transfer_options %}
-  <details class="adv">
-    <summary>This is a transfer between my accounts…</summary>
-    <p class="small muted">Pick the other side. Amounts don't have to match — a
+  <details class="adv"{{ ' open' if category_excluded }}>
+    <summary>Pair this with its other side…</summary>
+    <p class="small muted">Use this for a transfer between your accounts, or for
+    a charge and the reversal that cancels it. Amounts don't have to match — a
     fee or exchange difference can make them differ.</p>
     <form method="post" action="/transactions/{{ txn.id }}/link">
       <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -91,7 +92,7 @@
         <select name="other_id">
           {% for o in transfer_options %}
           <option value="{{ o.id }}">
-            {{ currency }}{{ o.amount_cents|money }} · {{ o.account_name }} ·
+            {{ currency }}{{ o.amount_cents|money }} · {{ o.account_name }}{{ ' (same account)' if o.same_account }} ·
             {{ o.date }}{% if not o.exact_amount %} (different amount){% endif %}
             — {{ o.description|truncate(38) }}</option>
           {% endfor %}
@@ -109,5 +110,54 @@
     <button class="btn danger block" type="submit">Delete transaction</button>
   </form>
 </div>
+
+<details class="card" {{ 'open' if not txn.category_id }}>
+  <summary style="cursor:pointer; font-weight:600">Where this came from</summary>
+  <table class="tbl" style="margin-top:8px">
+    <tr><td class="muted">As it appears on the statement</td>
+      <td><code style="font-size:12.5px">{{ txn.description }}</code></td></tr>
+    <tr><td class="muted">Account</td><td>{{ txn.account_name }}</td></tr>
+    <tr><td class="muted">Date</td><td>{{ txn.date }}</td></tr>
+    <tr><td class="muted">Amount</td><td class="num">{{ amount(txn.amount_cents) }}</td></tr>
+    {% if source %}
+    <tr><td class="muted">Imported from</td>
+      <td>{{ source.filename }}<div class="small muted">{{ source.created_at[:10] }}{% if source.display_name or source.username %} · by {{ source.display_name or source.username }}{% endif %} · <a href="/imports">import history</a></div></td></tr>
+    {% elif txn.manual %}
+    <tr><td class="muted">Source</td><td>Added by hand, not from a statement</td></tr>
+    {% endif %}
+    <tr><td class="muted">Grouped as</td>
+      <td><code style="font-size:12.5px">{{ txn.merchant_key }}</code>
+        <div class="small muted">This is what "always file here" and the merchant
+        totals match on.</div></td></tr>
+  </table>
+
+  {% if same_merchant %}
+  <p class="small muted" style="margin:10px 0 4px"><strong>{{ same_merchant|length }} other transaction{{ 's' if same_merchant|length != 1 }}</strong>
+    from the same merchant — a repeating amount usually identifies which account
+    or card it is.</p>
+  <div class="split-view">
+    {% for t in same_merchant %}
+    <div class="split-line">
+      <span><a href="/transactions/{{ t.id }}?back={{ ('/transactions/' ~ txn.id)|urlencode }}">{{ t.date }}</a>
+        <span class="muted">{{ t.account_name }}</span></span>
+      <span class="num">{{ amount(t.amount_cents) }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  <p class="small muted"><a href="/transactions?month=all&q={{ txn.merchant_key|urlencode }}">See all of them in Activity</a></p>
+  {% else %}
+  <p class="small muted" style="margin:10px 0 0">This is the only transaction
+  from this merchant so far.</p>
+  {% endif %}
+
+  {% if category_excluded and not partner %}
+  <div class="banner warn" style="margin:10px 0 0"><div class="grow small">
+    Filed as money moving between your own accounts, but the other side was
+    never imported — so whatever this paid for isn't counted anywhere. If it's a
+    card you haven't added yet, <a href="/accounts">add the account</a> and
+    <a href="/import">import its statement</a>; the two sides then match up on
+    their own.</div></div>
+  {% endif %}
+</details>
 
 {% endblock %}

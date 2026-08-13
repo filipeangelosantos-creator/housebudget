@@ -39,6 +39,7 @@ can say they belong together.</p>
       <div class="meta">{{ o.account_name }} · {{ o.date }} ·
         {% if o.days_apart == 0 %}same day{% else %}{{ o.days_apart }} day{{ 's' if o.days_apart != 1 }} apart{% endif %}
         {% if o.exact_amount %}<span class="chip">same amount</span>{% endif %}
+        {% if o.same_account %}<span class="chip">same account</span>{% endif %}
       </div>
     </div>
     <div class="amt {{ 'pos' if o.amount_cents > 0 }}">{{ amount(o.amount_cents) }}</div>

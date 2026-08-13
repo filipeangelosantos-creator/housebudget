@@ -84,6 +84,51 @@
       }
     });
     refresh();
+    window.__hbRefreshBulk = refresh;   // rows appended by infinite scroll
+  }
+
+  // Transaction list: load the next page as you reach the bottom, so a year of
+  // statements is one list rather than six pages you have to page through.
+  var pager = document.getElementById("txn-pager");
+  var rowHost = document.getElementById("txn-rows");
+  if (pager && rowHost && window.IntersectionObserver) {
+    var label = document.getElementById("txn-pager-label");
+    var pages = parseInt(pager.getAttribute("data-pages"), 10);
+    var base = pager.getAttribute("data-base") || "/transactions";
+    var next = parseInt(pager.getAttribute("data-next-page"), 10);
+    var loading = false;
+    pager.querySelectorAll("a").forEach(function (a) { a.remove(); });
+    if (label) label.textContent = "Loading more…";
+    var loadNext = function () {
+      if (loading || next > pages) return;
+      loading = true;
+      var url = base + (base.indexOf("?") === -1 ? "?" : "&") +
+        "rows_only=1&page=" + next;
+      fetch(url)
+        .then(function (r) { return r.text(); })
+        .then(function (html) {
+          rowHost.insertAdjacentHTML("beforeend", html);
+          next += 1;
+          loading = false;
+          if (next > pages) {
+            observer.disconnect();
+            if (label) label.textContent = "That's everything.";
+          } else if (label) {
+            label.textContent = "Loading more…";
+          }
+          // Newly added rows count towards the selection bar.
+          if (typeof window.__hbRefreshBulk === "function") window.__hbRefreshBulk();
+        })
+        .catch(function () {
+          loading = false;
+          if (label) label.textContent = "Couldn't load more — reload to retry.";
+          observer.disconnect();
+        });
+    };
+    var observer = new IntersectionObserver(function (entries) {
+      if (entries[0].isIntersecting) loadNext();
+    }, { rootMargin: "400px" });
+    observer.observe(pager);
   }
 
   // Insights: open any figure into the transactions behind it. Every number

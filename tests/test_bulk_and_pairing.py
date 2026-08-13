@@ -240,7 +240,7 @@ def test_transaction_page_links_and_unlinks_a_transfer(signed_in):
     conn.commit()
 
     r = signed_in.get(f"/transactions/{out}")
-    assert "This is a transfer between my accounts" in r.text
+    assert "Pair this with its other side" in r.text
     signed_in.post(f"/transactions/{out}/link", data={
         "csrf": get_csrf(r.text), "other_id": str(inn)})
     assert transfers.linked_partner(conn, out)["id"] == inn

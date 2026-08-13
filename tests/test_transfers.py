@@ -185,16 +185,42 @@ def test_manual_candidates_offers_mismatched_amounts(conn):
     assert options[0]["days_apart"] == 4
 
 
-def test_manual_candidates_exclude_same_account_and_same_direction(conn):
+def test_manual_candidates_exclude_same_direction_and_distant_dates(conn):
     two_accounts(conn)
     account(conn, 3, "Savings", "savings")
     out = add_txn(conn, 1, "2026-08-05", -50000, "MOVE OUT")
-    add_txn(conn, 1, "2026-08-05", 50000, "SAME ACCOUNT IN")     # same account
     add_txn(conn, 2, "2026-08-05", -50000, "ALSO GOING OUT")     # same direction
     add_txn(conn, 2, "2026-06-01", 50000, "TOO LONG AGO")        # outside window
     good = add_txn(conn, 3, "2026-08-06", 50000, "ARRIVED")
 
     assert [o["id"] for o in transfers.manual_candidates(conn, out)] == [good]
+
+
+def test_manual_candidates_offer_the_same_account_for_a_reversal(conn):
+    """A charge and the credit that cancels it land in one account. The
+    automatic matcher refuses to guess at that, which left no way to say so."""
+    two_accounts(conn)
+    charge = add_txn(conn, 2, "2026-03-19", -89500, "DEBIT ADJUSTMENT HYE WON KIM")
+    reversal = add_txn(conn, 2, "2026-03-19", 89500, "FILIPE SANTOS CREDIT ADJUSTMENT")
+    assert transfers.find_candidates(conn) == []      # never paired automatically
+
+    options = transfers.manual_candidates(conn, charge)
+    assert [o["id"] for o in options] == [reversal]
+    assert options[0]["same_account"] is True
+    assert options[0]["exact_amount"] is True
+
+    assert transfers.link_pair(conn, charge, reversal) is True
+    assert transfers.linked_partner(conn, charge)["id"] == reversal
+    # and they stop being reported as transfers missing their other side
+    assert transfers.all_unmatched(conn) == []
+
+
+def test_a_zero_amount_row_is_never_offered_as_a_side(conn):
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -50000, "MOVE OUT")
+    add_txn(conn, 2, "2026-08-05", 0, "ZERO ADJUSTMENT")
+    assert transfers.manual_candidates(conn, out) == []
+    assert transfers.unpaired(conn, account=2) == []
 
 
 def test_manual_candidates_rank_exact_amounts_first(conn):

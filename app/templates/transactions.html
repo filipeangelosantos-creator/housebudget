@@ -10,32 +10,38 @@
   <a class="btn small ghost" href="/transactions/new">+ Add manually</a>
 </div>
 
-<form method="get" action="/transactions">
-  <div class="filters">
-    <input type="month" name="month" value="{{ '' if show_all_months else month }}" data-autosubmit>
-    <select name="account" data-autosubmit>
-      <option value="">All accounts</option>
-      {% for a in accounts %}
-      <option value="{{ a.id }}" {{ 'selected' if account == a.id }}>{{ a.name }}</option>
-      {% endfor %}
-    </select>
-    <select name="category" data-autosubmit>
-      <option value="">All categories</option>
-      <option value="uncat" {{ 'selected' if category == 'uncat' }}>⚠ Uncategorized</option>
-      {% for c in categories %}
-      <option value="{{ c.id }}" {{ 'selected' if category == c.id|string }}>{{ c.group_name }} · {{ c.name }}</option>
-      {% endfor %}
-    </select>
-    <input type="text" name="q" value="{{ q }}" placeholder="Search description…" enterkeyhint="search">
-  </div>
-  <noscript><button class="btn small ghost" type="submit">Filter</button></noscript>
-</form>
+<div class="filter-bar">
+  <form method="get" action="/transactions">
+    <div class="filters">
+      <input type="month" name="month" value="{{ '' if show_all_months else month }}" data-autosubmit>
+      <select name="account" data-autosubmit>
+        <option value="">All accounts</option>
+        {% for a in accounts %}
+        <option value="{{ a.id }}" {{ 'selected' if account == a.id }}>{{ a.name }}</option>
+        {% endfor %}
+      </select>
+      <select name="category" data-autosubmit>
+        <option value="">All categories</option>
+        <option value="uncat" {{ 'selected' if category == 'uncat' }}>⚠ Uncategorized</option>
+        {% for c in categories %}
+        <option value="{{ c.id }}" {{ 'selected' if category == c.id|string }}>{{ c.group_name }} · {{ c.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="text" name="q" value="{{ q }}" placeholder="Search text or amount…"
+             enterkeyhint="search" autocomplete="off">
+    </div>
+    <noscript><button class="btn small ghost" type="submit">Filter</button></noscript>
+  </form>
 
-<p class="small muted">
-  {{ total }} transaction{{ 's' if total != 1 }}{% if not show_all_months %} in {{ month_label }}{% endif %}
-  · net {{ amount(total_sum) }}
-  {% if not show_all_months %} · <a href="/transactions?month=all&account={{ account or '' }}&category={{ category }}&q={{ q|urlencode }}">show all months</a>{% endif %}
-</p>
+  <p class="small muted result-line">
+    {{ total }} transaction{{ 's' if total != 1 }}{% if not show_all_months %} in {{ month_label }}{% endif %}
+    · net {{ amount(total_sum) }}
+    {% if not show_all_months %} · <a href="/transactions?month=all&account={{ account or '' }}&category={{ category }}&q={{ q|urlencode }}">show all months</a>{% endif %}
+  </p>
+</div>
+
+<p class="small muted search-hint">Amounts work too: <code>400.27</code>,
+  <code>-400.27</code> for money out, <code>&gt;500</code>, <code>100-200</code>.</p>
 
 <form method="post" action="/transactions/bulk" id="bulk-form">
   <input type="hidden" name="csrf" value="{{ csrf }}">
@@ -49,27 +55,15 @@
     {% if rows %}
     <label class="check" style="margin:0 0 6px">
       <input type="checkbox" id="select-all">
-      <span class="small muted">Select all on this page</span>
+      <span class="small muted">Select all loaded</span>
     </label>
     {% endif %}
-    {% for t in rows %}
-    <div class="txn">
-      <input type="checkbox" name="txn" value="{{ t.id }}" class="txn-check"
-             aria-label="Select {{ t.description|truncate(40) }}">
-      <div class="mid">
-        <div class="desc"><a href="/transactions/{{ t.id }}?back={{ back|urlencode }}">{{ t.description }}</a></div>
-        <div class="meta">{{ t.date }} · {{ t.account_name }} ·
-          {% if t.n_splits %}<span class="chip">split · {{ t.n_splits }} categories</span>
-          {% elif t.category_name %}<span class="chip">{{ t.category_name }}</span>
-          {% else %}<span class="chip uncat">uncategorized</span>{% endif %}
-          {% if t.needs_review %}<span class="chip uncat">confirm?</span>{% endif %}
-        </div>
-      </div>
-      <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+    <div id="txn-rows">
+      {% include "_txn_rows.html" %}
     </div>
-    {% else %}
+    {% if not rows %}
     <p class="muted">Nothing here yet. <a href="/import">Import a statement</a> or <a href="/transactions/new">add one manually</a>.</p>
-    {% endfor %}
+    {% endif %}
   </div>
 
   {% if rows %}
@@ -93,9 +87,10 @@
 </form>
 
 {% if pages > 1 %}
-<div class="pager">
+<div class="pager" id="txn-pager" data-next-page="2" data-pages="{{ pages }}"
+     data-base="{{ back }}">
   {% if page > 1 %}<a class="btn small ghost" href="/transactions?month={{ month }}&account={{ account or '' }}&category={{ category }}&q={{ q|urlencode }}&page={{ page - 1 }}">‹ Newer</a>{% else %}<span></span>{% endif %}
-  <span class="small muted">page {{ page }} / {{ pages }}</span>
+  <span class="small muted" id="txn-pager-label">page {{ page }} / {{ pages }}</span>
   {% if page < pages %}<a class="btn small ghost" href="/transactions?month={{ month }}&account={{ account or '' }}&category={{ category }}&q={{ q|urlencode }}&page={{ page + 1 }}">Older ›</a>{% else %}<span></span>{% endif %}
 </div>
 {% endif %}

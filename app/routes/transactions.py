@@ -1,6 +1,7 @@
 """Transaction list/filter, edit page with rule learning, the review queue
 (uncategorized plus mixed-basket confirmations), splitting one transaction
 across categories, and manual entry."""
+import re
 import uuid
 from datetime import date
 
@@ -34,6 +35,47 @@ def _txn_or_404(conn, txn_id: int):
     return row
 
 
+_NUM = r"\d{1,3}(?:[ ,.]\d{3})*(?:[.,]\d{1,2})?|\d+(?:[.,]\d{1,2})?"
+AMOUNT_COMPARE = re.compile(rf"^(?P<op>[<>]=?)\s*(?P<n>{_NUM})$")
+AMOUNT_RANGE = re.compile(rf"^(?P<lo>{_NUM})\s*(?:-|–|\.\.|to)\s*(?P<hi>{_NUM})$")
+# Only punctuation may lead — a currency symbol, not a letter, so a reference
+# like "P26126" stays a text search instead of becoming an amount.
+AMOUNT_EXACT = re.compile(rf"^(?P<sign>[-+])?\s*[^\w\s]{{0,2}}\s*(?P<n>{_NUM})$")
+DATEISH = re.compile(r"^\d{4}-\d{1,2}(-\d{1,2})?$")
+
+
+def _amount_filter(q: str) -> tuple[str, list] | None:
+    """Read a search box entry as money, when that is what it looks like.
+
+    "400.27" finds the transaction for that amount, ">500" everything bigger,
+    "100-200" a band. Anything else is left to the description search — this
+    only fires on text that is unambiguously a number.
+    """
+    text = q.strip()
+    if DATEISH.match(text):
+        return None                    # "2026-05" is a date, not 500–202,600
+    m = AMOUNT_COMPARE.match(text)
+    if m:
+        cents = parse_money_input(m.group("n"))
+        op = m.group("op")
+        return f"ABS(t.amount_cents) {op} ?", [cents]
+    m = AMOUNT_RANGE.match(text)
+    if m:
+        lo, hi = parse_money_input(m.group("lo")), parse_money_input(m.group("hi"))
+        return "ABS(t.amount_cents) BETWEEN ? AND ?", [min(lo, hi), max(lo, hi)]
+    m = AMOUNT_EXACT.match(text)
+    if m:
+        cents = parse_money_input(m.group("n"))
+        if cents == 0:
+            return None
+        if m.group("sign") == "-":
+            return "t.amount_cents = ?", [-cents]
+        if m.group("sign") == "+":
+            return "t.amount_cents = ?", [cents]
+        return "ABS(t.amount_cents) = ?", [cents]
+    return None
+
+
 def _list_filters(month: str | None, account: str, category: str, q: str):
     """The WHERE clause behind the transaction list, shared with bulk edits so
     "apply to everything matching" really means what the list is showing."""
@@ -51,9 +93,17 @@ def _list_filters(month: str | None, account: str, category: str, q: str):
         where.append("t.category_id = ?")
         params.append(int(category))
     if q and q.strip():
-        where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
-        like = f"%{q.strip()}%"
-        params.extend([like, like.upper()])
+        text = q.strip()
+        money = _amount_filter(text)
+        if money:
+            # A bare number could still be part of a reference in the text, so
+            # both are offered rather than the amount silently winning.
+            sql, money_params = money
+            where.append(f"({sql} OR t.description LIKE ?)")
+            params.extend(money_params + [f"%{text}%"])
+        else:
+            where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
+            params.extend([f"%{text}%", f"%{text.upper()}%"])
     return where, params
 
 
@@ -61,7 +111,7 @@ def _list_filters(month: str | None, account: str, category: str, q: str):
 def transactions_list(request: Request, conn=Depends(get_conn),
                       user=Depends(current_user), month: str | None = None,
                       account: str = "", category: str | None = None,
-                      q: str = "", page: str = "1"):
+                      q: str = "", page: str = "1", rows_only: str = ""):
     # The filter form submits account= and page= as empty strings for "all" /
     # unset; typing these as int made FastAPI reject the request outright.
     page = max(1, int(page)) if page.isdigit() else 1
@@ -88,13 +138,20 @@ def transactions_list(request: Request, conn=Depends(get_conn),
         f"{where_sql} ORDER BY t.date DESC, t.id DESC LIMIT ? OFFSET ?",
         params + [PAGE_SIZE, (page - 1) * PAGE_SIZE]).fetchall()
 
+    pages = max(1, -(-total // PAGE_SIZE))
+    if rows_only:
+        # Just the next block of rows, for the list that grows as you scroll.
+        return render(request, conn, "_txn_rows.html", rows=rows, page=page,
+                      pages=pages, back=str(request.url.remove_query_params(
+                          ["rows_only", "page"])))
+
     accounts = conn.execute(
         "SELECT id, name FROM accounts WHERE archived = 0 ORDER BY name").fetchall()
     from ..services.budgets import current_month, month_label, shift_month
     m_for_nav = m or current_month()
     return render(request, conn, "transactions.html",
                   rows=rows, total=total, total_sum=total_sum, page=page,
-                  pages=max(1, -(-total // PAGE_SIZE)),
+                  pages=pages,
                   month=month or m_for_nav, show_all_months=show_all_months,
                   month_label="All months" if show_all_months else month_label(m_for_nav),
                   prev_month=shift_month(m_for_nav, -1),
@@ -192,7 +249,24 @@ def txn_edit_page(txn_id: int, request: Request, conn=Depends(get_conn),
         "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL AND "
         "merchant_key = ? AND id != ?", (txn["merchant_key"], txn_id)).fetchone()[0]
     partner = transfers.linked_partner(conn, txn_id)
+    # Where this row came from: the statement it was read out of, and the rest
+    # of this merchant's history. Between them they answer "what is this?" for
+    # a line whose description is only a reference number.
+    source = conn.execute(
+        "SELECT i.id, i.filename, i.created_at, u.display_name, u.username "
+        "FROM imports i LEFT JOIN users u ON u.id = i.uploaded_by "
+        "WHERE i.id = ?", (txn["import_id"],)).fetchone() if txn["import_id"] else None
+    same_merchant = conn.execute(
+        "SELECT t.id, t.date, t.amount_cents, t.description, a.name AS account_name "
+        "FROM transactions t JOIN accounts a ON a.id = t.account_id "
+        "WHERE t.merchant_key = ? AND t.id != ? ORDER BY t.date DESC LIMIT 12",
+        (txn["merchant_key"], txn_id)).fetchall()
+    excluded = conn.execute(
+        "SELECT excluded FROM categories WHERE id = ?",
+        (txn["category_id"],)).fetchone() if txn["category_id"] else None
     return render(request, conn, "txn_edit.html", txn=txn,
+                  source=source, same_merchant=same_merchant,
+                  category_excluded=bool(excluded and excluded["excluded"]),
                   categories=_categories_grouped(conn),
                   suggested_pattern=classify.suggest_pattern(txn["description"]),
                   similar_uncat=similar_uncat,

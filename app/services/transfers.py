@@ -126,9 +126,13 @@ def manual_candidates(conn, txn_id: int, max_days: int = MANUAL_MAX_DAYS,
     """Transactions that could be the other side of this one.
 
     Deliberately looser than the automatic matcher: any opposite-signed,
-    unpaired transaction in a different account within a few weeks. Amounts
-    need not match — a wire fee or an FX difference makes the two sides differ,
-    and only you can say they belong together.
+    unpaired transaction within a few weeks. Amounts need not match — a wire
+    fee or an FX difference makes the two sides differ, and only you can say
+    they belong together.
+
+    The same account is allowed here even though the automatic matcher refuses
+    it. A charge and its reversal land in one account and cancel out, and
+    without this there was no way at all to say so.
     """
     txn = conn.execute(
         "SELECT id, account_id, date, amount_cents FROM transactions WHERE id = ?",
@@ -136,24 +140,25 @@ def manual_candidates(conn, txn_id: int, max_days: int = MANUAL_MAX_DAYS,
     if txn is None:
         return []
     rows = conn.execute(
-        """SELECT t.id, t.date, t.description, t.amount_cents,
+        """SELECT t.id, t.date, t.description, t.amount_cents, t.account_id,
                   a.name AS account_name,
                   ABS(julianday(t.date) - julianday(?)) AS days_apart
            FROM transactions t JOIN accounts a ON a.id = t.account_id
-           WHERE t.account_id != ?
+           WHERE t.id != ?
              AND ((? < 0 AND t.amount_cents > 0) OR (? > 0 AND t.amount_cents < 0))
              AND ABS(julianday(t.date) - julianday(?)) <= ?
              AND NOT EXISTS (SELECT 1 FROM transfer_links l
                              WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)
            ORDER BY ABS(ABS(t.amount_cents) - ?), days_apart
            LIMIT ?""",
-        (txn["date"], txn["account_id"], txn["amount_cents"], txn["amount_cents"],
+        (txn["date"], txn_id, txn["amount_cents"], txn["amount_cents"],
          txn["date"], max_days, abs(txn["amount_cents"]), limit)).fetchall()
     out = []
     for r in rows:
         entry = dict(r)
         entry["days_apart"] = int(entry["days_apart"])
         entry["exact_amount"] = abs(r["amount_cents"]) == abs(txn["amount_cents"])
+        entry["same_account"] = r["account_id"] == txn["account_id"]
         out.append(entry)
     return out
 
@@ -166,7 +171,8 @@ def unpaired(conn, q: str = "", account: int | None = None,
     search when you know two rows belong together and it didn't notice.
     """
     where = ["NOT EXISTS (SELECT 1 FROM transfer_links l "
-             "WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)"]
+             "WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)",
+             "t.amount_cents != 0"]
     params: list = []
     if q.strip():
         where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
