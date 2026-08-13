@@ -193,6 +193,11 @@ def test_full_journey():
         txn = conn.execute("SELECT id FROM transactions LIMIT 1").fetchone()
         conn.close()
         for path in ("/transactions", "/transactions?month=all&q=star",
+                     # the filter form submits empty values for "all" — these
+                     # 422'd instead of rendering (regression)
+                     "/transactions?month=2026-06&account=&category=&q=",
+                     "/transactions?account=999&page=&q=%25",
+                     "/transactions?page=abc&account=abc",
                      "/transactions/new", f"/transactions/{txn['id']}",
                      f"/transactions/{txn['id']}/split",
                      "/accounts", "/categories", "/rules", "/settings",

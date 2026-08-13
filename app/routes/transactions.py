@@ -37,8 +37,12 @@ def _txn_or_404(conn, txn_id: int):
 @router.get("/transactions")
 def transactions_list(request: Request, conn=Depends(get_conn),
                       user=Depends(current_user), month: str | None = None,
-                      account: int | None = None, category: str | None = None,
-                      q: str = "", page: int = 1):
+                      account: str = "", category: str | None = None,
+                      q: str = "", page: str = "1"):
+    # The filter form submits account= and page= as empty strings for "all" /
+    # unset; typing these as int made FastAPI reject the request outright.
+    account = int(account) if account.isdigit() else None
+    page = max(1, int(page)) if page.isdigit() else 1
     where, params = [], []
     # No param -> current month; explicit "all" or a cleared month input -> all months
     show_all_months = month is not None and month.strip() in ("all", "")
@@ -65,7 +69,6 @@ def transactions_list(request: Request, conn=Depends(get_conn),
     total_sum = conn.execute(
         f"SELECT COALESCE(SUM(t.amount_cents),0) FROM transactions t {where_sql}",
         params).fetchone()[0]
-    page = max(1, page)
     rows = conn.execute(
         f"SELECT t.id, t.date, t.description, t.amount_cents, t.category_id, "
         f"t.needs_review, a.name AS account_name, a.type AS account_type, "
