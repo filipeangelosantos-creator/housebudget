@@ -3,7 +3,10 @@
 Everything seeded here is editable in the app (Budgets → Categories and the
 Rules page). Seeds only run when the corresponding tables are empty.
 """
-from ..db import utcnow
+from ..db import get_setting, set_setting, utcnow
+
+# Bump when DEFAULT_RULES gains entries, so existing databases pick them up.
+SEED_RULES_VERSION = 2
 
 # (group, kind, [(category, excluded)])
 DEFAULT_CATEGORIES = [
@@ -57,12 +60,25 @@ DEFAULT_RULES = [
     # Housing
     ("MORTGAGE", "Rent / Mortgage", 100),
     ("RENT PAYMENT", "Rent / Mortgage", 100),
-    # Transfers / CC payments (excluded from budget)
+    # Transfers / CC payments (excluded from budget). Deliberately specific:
+    # a bare "AUTO PAY" would swallow a car-loan direct debit, which is a real
+    # expense, so only wordings that mean "paying off this card" are listed.
     ("PAYMENT THANK YOU", "Credit Card Payment", 90),
     ("PAYMENT - THANK", "Credit Card Payment", 90),
     ("PAYMENT RECEIVED", "Credit Card Payment", 95),
     ("AUTOPAY", "Credit Card Payment", 95),
+    ("AUTO PAYMENT", "Credit Card Payment", 95),
+    ("AUTOMATIC PAYMENT", "Credit Card Payment", 95),
+    ("MOBILE PAYMENT", "Credit Card Payment", 95),
+    ("ONLINE PAYMENT", "Credit Card Payment", 95),
+    ("ELECTRONIC PAYMENT", "Credit Card Payment", 95),
+    ("EPAYMENT", "Credit Card Payment", 95),
+    ("CREDIT CRD", "Credit Card Payment", 95),
+    ("CREDIT CARD PAYMENT", "Credit Card Payment", 90),
+    ("CARDMEMBER SERV", "Credit Card Payment", 95),
+    ("BILL PAYMENT", "Transfers", 105),
     ("TRANSFER", "Transfers", 110), ("XFER", "Transfers", 110),
+    ("WEBXFR", "Transfers", 105), ("P2P", "Transfers", 105),
     # Groceries
     ("WALMART", "Groceries", 100), ("WAL-MART", "Groceries", 100),
     ("COSTCO", "Groceries", 100), ("SAFEWAY", "Groceries", 100),
@@ -169,21 +185,47 @@ def seed_defaults(conn) -> None:
                     "VALUES (?, ?, ?, ?)", (gid, cname, ci, excluded))
         conn.commit()
 
-    if conn.execute("SELECT COUNT(*) FROM rules").fetchone()[0] == 0:
-        cat_ids = {r["name"]: r["id"] for r in
-                   conn.execute("SELECT id, name FROM categories").fetchall()}
-        now = utcnow()
-        for pattern, cat_name, priority in DEFAULT_RULES:
-            cat_id = cat_ids.get(cat_name)
-            if cat_id:
-                conn.execute(
-                    "INSERT INTO rules (pattern, match_type, category_id, priority, "
-                    "source, created_at) VALUES (?, 'contains', ?, ?, 'seed', ?)",
-                    (pattern, cat_id, priority, now))
-        conn.commit()
+    ensure_seed_rules(conn)
 
     if not conn.execute("SELECT 1 FROM settings WHERE key = 'currency'").fetchone():
         conn.execute("INSERT INTO settings (key, value) VALUES ('currency', '$')")
         conn.execute(
             "INSERT OR IGNORE INTO settings (key, value) VALUES ('household', 'Our Budget')")
         conn.commit()
+
+
+def ensure_seed_rules(conn) -> int:
+    """Install any built-in rules the database doesn't have yet.
+
+    Without this, a database created by an earlier release would never see
+    rules added later — the original seeding only ran on an empty table. Only
+    runs when SEED_RULES_VERSION moves, and never touches or duplicates a rule
+    whose pattern already exists, so edits and additions of your own survive.
+    """
+    if int(get_setting(conn, "seed_rules_version", "0") or 0) >= SEED_RULES_VERSION:
+        return 0
+
+    existing = {r["pattern"].strip().upper()
+                for r in conn.execute("SELECT pattern FROM rules").fetchall()}
+    cat_ids = {r["name"]: r["id"] for r in
+               conn.execute("SELECT id, name FROM categories").fetchall()}
+    now = utcnow()
+    added = 0
+    for pattern, cat_name, priority in DEFAULT_RULES:
+        cat_id = cat_ids.get(cat_name)
+        if not cat_id or pattern.strip().upper() in existing:
+            continue
+        conn.execute(
+            "INSERT INTO rules (pattern, match_type, category_id, priority, "
+            "source, created_at) VALUES (?, 'contains', ?, ?, 'seed', ?)",
+            (pattern, cat_id, priority, now))
+        existing.add(pattern.strip().upper())
+        added += 1
+    conn.commit()
+    set_setting(conn, "seed_rules_version", str(SEED_RULES_VERSION))
+
+    if added:
+        # New rules should reach the backlog, not just future imports.
+        from . import classify
+        classify.apply_rules_to_uncategorized(conn)
+    return added

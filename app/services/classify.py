@@ -52,19 +52,52 @@ AGGREGATOR_PREFIXES = {
     "SHOPIFY", "FSP", "PY", "LSK", "MKTPL",
 }
 
+# Words too common to stand alone in a rule: "AUTO" would file your car
+# insurance under whatever you once picked for an automatic payment.
+GENERIC_WORDS = {
+    "AUTO", "AUTOMATIC", "POINT", "PAYMENT", "PAYMENTS", "PAY", "ONLINE",
+    "MOBILE", "ELECTRONIC", "RECURRING", "MONTHLY", "ANNUAL", "PURCHASE",
+    "STORE", "SHOP", "MARKET", "CENTER", "CENTRE", "SERVICE", "SERVICES",
+    "COMPANY", "GROUP", "NATIONAL", "AMERICAN", "UNITED", "GENERAL", "FIRST",
+    "ONE", "THE", "AND", "NEW", "CITY", "TOWN", "STATE", "COUNTY", "TOTAL",
+    "DIRECT", "EXPRESS", "PRIME", "SUPER", "GRAND", "ROYAL", "GLOBAL",
+    "INTERNATIONAL", "LLC", "INC", "LTD", "CORP", "CO", "PLC", "SA", "LDA",
+    "TRANSFER", "DEPOSIT", "WITHDRAWAL", "CHARGE", "CREDIT", "DEBIT", "BANK",
+}
+
+US_STATES = {
+    "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID",
+    "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS",
+    "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK",
+    "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV",
+    "WI", "WY", "DC",
+}
+
+MAX_PATTERN_TOKENS = 3
+
+
+def _too_weak(token: str) -> bool:
+    return (len(token) < 5 or token in GENERIC_WORDS
+            or token in AGGREGATOR_PREFIXES)
+
 
 def suggest_pattern(desc: str) -> str:
-    """Suggested rule pattern when learning from a user correction."""
-    key = merchant_key(desc)
-    tokens = key.split(" ")
-    if not tokens or not tokens[0]:
-        return key
-    # "GOOGLE LINKEDINCOMMU" must not become a rule on "GOOGLE"
-    if tokens[0] in AGGREGATOR_PREFIXES and len(tokens) >= 2:
-        return " ".join(tokens[:2])
-    if len(tokens[0]) >= 4:
-        return tokens[0]
-    return " ".join(tokens[:2])
+    """A rule pattern specific enough to be safe to apply automatically.
+
+    Grows from one token until it ends on something distinctive, so
+    "POINT AND BALANCE LLC NEEDHAM MA" suggests "POINT AND BALANCE" rather
+    than "POINT", which would also catch every other merchant with that word.
+    """
+    tokens = [t for t in merchant_key(desc).split(" ") if t]
+    if len(tokens) >= 2 and tokens[-1] in US_STATES:
+        tokens = tokens[:-1]                     # trailing state code is noise
+    if not tokens:
+        return merchant_key(desc)
+
+    take = 1
+    while take < min(len(tokens), MAX_PATTERN_TOKENS) and _too_weak(tokens[take - 1]):
+        take += 1
+    return " ".join(tokens[:take])
 
 
 def load_rules(conn) -> list[dict]:
