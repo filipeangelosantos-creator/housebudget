@@ -43,14 +43,20 @@ async def budgets_save(request: Request, conn=Depends(get_conn),
 
 @router.post("/budgets/use-expected", dependencies=[Depends(verify_csrf)])
 def budgets_use_expected(request: Request, conn=Depends(get_conn),
-                         user=Depends(current_user), month: str = Form(...)):
+                         user=Depends(current_user), month: str = Form(...),
+                         basis: str = Form("expected")):
     """Budget each income category for the paydays that actually land this
-    month, rather than a flat figure that is wrong every other month."""
+    month, rather than a flat figure that is wrong every other month.
+
+    `basis` picks which end of the range: the usual estimate, or the low one
+    for people who would rather not plan around money that might not arrive.
+    """
     m = clean_month(month)
+    field = "low" if basis == "low" else "expected"
     per_category: dict[str, int] = {}
     for entry in insights.expected_income(conn, m)["detail"]:
         per_category[entry["stream"].category] = (
-            per_category.get(entry["stream"].category, 0) + entry["expected"])
+            per_category.get(entry["stream"].category, 0) + entry[field])
     # Anything inherited from a previous month must become explicit now, or
     # saving one category would drop the rest.
     existing, inherited_from = budgets.effective_budgets(conn, m)

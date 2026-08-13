@@ -8,7 +8,7 @@ identical to the dashboard's — the uncategorized backlog is reported on its ow
 rather than silently inflating income and spending.
 """
 import calendar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
 from .budgets import expense_budget_total, shift_month
@@ -195,9 +195,23 @@ class PayStream:
     name: str
     category: str
     cadence: str                 # weekly | biweekly | semimonthly | monthly
-    typical_cents: int
+    typical_cents: int           # what one payday is worth, best estimate
     last_date: date
     days_of_month: list[int]
+    recent: list[tuple[date, int]] = field(default_factory=list)  # newest first
+    low_cents: int = 0
+    high_cents: int = 0
+
+    @property
+    def varies(self) -> bool:
+        """Whether the amount moves enough to be worth saying out loud.
+
+        Almost no real pay is identical every time — overtime, a bonus, a tax
+        band changing. A couple of pounds either way is noise; a tenth of the
+        cheque is a range you should budget against, not a single figure.
+        """
+        spread = self.high_cents - self.low_cents
+        return spread > max(500, self.typical_cents // 20)
 
     @property
     def cadence_label(self) -> str:
@@ -254,11 +268,27 @@ def _classify_cadence(dates: list[date]) -> tuple[str, list[int]] | None:
     return None
 
 
-def pay_streams(conn, month: str, lookback: int = 6) -> list[PayStream]:
-    """Recurring income, with how often each one pays.
+def _median(values: list[int]) -> int:
+    """Lower-middle median, in whole cents. Robust to one odd cheque."""
+    ordered = sorted(values)
+    return ordered[(len(ordered) - 1) // 2] if ordered else 0
+
+
+RECENT_PAYDAYS = 6      # window the range is drawn from
+TRACKING_PAYDAYS = 3    # window the estimate is drawn from
+
+
+def pay_streams(conn, month: str, lookback: int = 9) -> list[PayStream]:
+    """Recurring income, with how often each one pays and how much.
 
     Salary paid fortnightly lands three times in some months and twice in
     others, so a flat monthly income figure is always wrong for one of them.
+
+    The amount is never quite the same twice either, so each payday is
+    estimated from the last few rather than from the whole history: a raise
+    six months ago should not still be dragging the figure down. The spread
+    over a longer window is kept alongside, because "about X, between A and B"
+    is the honest answer and a single figure is not.
     """
     seq = months_back(month, lookback)
     rows = conn.execute(
@@ -277,15 +307,26 @@ def pay_streams(conn, month: str, lookback: int = 6) -> list[PayStream]:
 
     streams: list[PayStream] = []
     for merchant, entries in grouped.items():
-        dates = [date.fromisoformat(e["date"]) for e in entries]
-        cadence = _classify_cadence(sorted(set(dates)))
+        # Per payday, not per transaction: two deposits landing the same day
+        # (both salaries from one employer, or a cheque paid in two parts) are
+        # one payday's money, and averaging them halves the estimate.
+        per_day: dict[date, int] = {}
+        for e in entries:
+            day = date.fromisoformat(e["date"])
+            per_day[day] = per_day.get(day, 0) + e["amount_cents"]
+        dates = sorted(per_day)
+        cadence = _classify_cadence(dates)
         if cadence is None:
             continue
-        amounts = sorted(e["amount_cents"] for e in entries)
+        recent_dates = dates[-RECENT_PAYDAYS:]
+        window = [per_day[d] for d in recent_dates]
         streams.append(PayStream(
             name=merchant.title(), category=entries[-1]["category"],
-            cadence=cadence[0], typical_cents=amounts[len(amounts) // 2],
-            last_date=max(dates), days_of_month=cadence[1]))
+            cadence=cadence[0],
+            typical_cents=_median(window[-TRACKING_PAYDAYS:]),
+            last_date=dates[-1], days_of_month=cadence[1],
+            recent=[(d, per_day[d]) for d in reversed(recent_dates)],
+            low_cents=min(window), high_cents=max(window)))
     streams.sort(key=lambda s: -s.typical_cents)
     return streams
 
@@ -294,14 +335,18 @@ def expected_income(conn, month: str, today: date | None = None) -> dict:
     """What recurring income should total this month, given when it lands."""
     streams = pay_streams(conn, month)
     detail = []
-    total = 0
+    total = low = high = 0
     for stream in streams:
         days = stream.paydays_in(month)
         if not days:
             continue
         amount = stream.typical_cents * len(days)
         total += amount
-        detail.append({"stream": stream, "paydays": days, "expected": amount})
+        low += stream.low_cents * len(days)
+        high += stream.high_cents * len(days)
+        detail.append({"stream": stream, "paydays": days, "expected": amount,
+                       "low": stream.low_cents * len(days),
+                       "high": stream.high_cents * len(days)})
     received = conn.execute(
         """SELECT COALESCE(SUM(a.amount_cents), 0) AS total FROM txn_allocations a
            JOIN categories c ON c.id = a.category_id
@@ -311,8 +356,9 @@ def expected_income(conn, month: str, today: date | None = None) -> dict:
         (month,)).fetchone()["total"]
     today = today or date.today()
     upcoming = [d for entry in detail for d in entry["paydays"] if d > today]
-    return {"total": total, "detail": detail, "received": received,
-            "upcoming": sorted(upcoming)}
+    return {"total": total, "low": low, "high": high, "detail": detail,
+            "received": received, "upcoming": sorted(upcoming),
+            "varies": any(e["stream"].varies for e in detail)}
 
 
 @dataclass

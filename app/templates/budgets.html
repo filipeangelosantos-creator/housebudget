@@ -33,21 +33,46 @@ planned spending {{ currency }}{{ summary.expense_budget|money }} =
         {{ entry.paydays|length }} payday{{ 's' if entry.paydays|length != 1 }} in
         {{ month_label }} ({% for d in entry.paydays %}{{ d.strftime('%-d %b') }}{{ ', ' if not loop.last }}{% endfor %})</div>
     </div>
-    <div class="amt">{{ currency }}{{ entry.expected|money }}</div>
+    <div class="amt">{{ '≈ ' if entry.stream.varies }}{{ currency }}{{ entry.expected|money }}</div>
   </div>
+  {% if entry.stream.varies %}
+  <p class="small muted" style="margin:-4px 0 6px">
+    The amount isn't the same each time — recent paydays were
+    {% for d, cents in entry.stream.recent[:4] %}{{ currency }}{{ cents|money }}
+      ({{ d.strftime('%-d %b') }}){{ ', ' if not loop.last }}{% endfor %}.
+    So expect somewhere between {{ currency }}{{ entry.low|money }} and
+    {{ currency }}{{ entry.high|money }} this month.</p>
+  {% endif %}
   {% endfor %}
   <div class="spread" style="margin-top:8px">
     <span class="small">Expected this month</span>
-    <strong>{{ currency }}{{ income.total|money }}</strong>
+    <strong>{{ '≈ ' if income.varies }}{{ currency }}{{ income.total|money }}</strong>
   </div>
+  {% if income.varies %}
+  <div class="spread">
+    <span class="small muted">Low to high</span>
+    <span class="small muted">{{ currency }}{{ income.low|money }} –
+      {{ currency }}{{ income.high|money }}</span>
+  </div>
+  {% endif %}
   <p class="small muted">Pay that lands every two weeks falls three times in some
   months and twice in others, so this varies by month on purpose. Received so far:
   {{ currency }}{{ income.received|money }}.</p>
+  {% if income.varies %}
+  <p class="small muted">The estimate follows your last few paydays rather than
+  the whole year, so a raise shows up straight away. Budget the low end if you'd
+  rather not count on money that might not arrive.</p>
+  {% endif %}
   <form method="post" action="/budgets/use-expected">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="month" value="{{ month }}">
-    <button class="btn ghost block" type="submit">Set income budget to
-      {{ currency }}{{ income.total|money }}</button>
+    <button class="btn ghost block" type="submit" name="basis" value="expected">
+      Set income budget to {{ currency }}{{ income.total|money }}</button>
+    {% if income.varies %}
+    <button class="btn ghost block" type="submit" name="basis" value="low"
+            style="margin-top:6px">Or budget the low end,
+      {{ currency }}{{ income.low|money }}</button>
+    {% endif %}
   </form>
 </div>
 {% endif %}

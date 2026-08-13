@@ -162,3 +162,81 @@ def test_upcoming_paydays_are_listed_only_while_they_are_still_ahead(conn):
     after = insights.expected_income(conn, "2026-08", today=date(2026, 8, 31))
     assert after["upcoming"] == []
     assert after["total"] == 400000
+
+
+# --- pay that isn't the same every time --------------------------------------
+
+def varying(conn, amounts, start=date(2026, 5, 1), desc="ACME PAYROLL"):
+    """One fortnightly stream whose cheque differs each time."""
+    from datetime import timedelta
+    for i, cents in enumerate(amounts):
+        add_txn(conn, (start + timedelta(days=14 * i)).isoformat(), cents, desc,
+                "Salary")
+
+
+def test_the_estimate_follows_the_recent_paydays_not_the_whole_history(conn):
+    """A raise six months ago should not still be dragging the figure down."""
+    varying(conn, [150000, 150000, 150000, 150000, 200000, 200000, 200000])
+    stream = insights.pay_streams(conn, "2026-08")[0]
+    assert stream.typical_cents == 200000      # the new rate, not the old median
+
+
+def test_a_single_odd_cheque_does_not_move_the_estimate(conn):
+    """Median of the recent window, so one big month is not mistaken for a
+    raise — that is the whole reason it isn't a mean."""
+    varying(conn, [160000, 162000, 158000, 161000, 900000, 159000])
+    stream = insights.pay_streams(conn, "2026-08")[0]
+    assert 155000 <= stream.typical_cents <= 165000
+
+
+def test_a_varying_stream_reports_the_range_it_moves_in(conn):
+    varying(conn, [150000, 172000, 158000, 165000, 149000, 168000])
+    stream = insights.pay_streams(conn, "2026-08")[0]
+    assert stream.varies is True
+    assert (stream.low_cents, stream.high_cents) == (149000, 172000)
+    assert [cents for _, cents in stream.recent][:2] == [168000, 149000]  # newest first
+
+
+def test_pay_that_really_is_constant_is_not_called_variable(conn):
+    varying(conn, [160000] * 6)
+    stream = insights.pay_streams(conn, "2026-08")[0]
+    assert stream.varies is False
+    assert stream.low_cents == stream.high_cents == 160000
+
+
+def test_a_few_cents_of_drift_is_noise_not_a_range(conn):
+    varying(conn, [160000, 160120, 159950, 160080, 160010, 159990])
+    assert insights.pay_streams(conn, "2026-08")[0].varies is False
+
+
+def test_expected_income_carries_the_range_for_the_month(conn):
+    varying(conn, [150000, 172000, 158000, 165000, 149000, 168000])
+    got = insights.expected_income(conn, "2026-08")
+    assert got["varies"] is True
+    n = len(got["detail"][0]["paydays"])
+    assert got["low"] == 149000 * n
+    assert got["high"] == 172000 * n
+    assert got["low"] < got["total"] < got["high"]
+
+
+def test_two_deposits_on_one_day_are_one_payday_not_two_half_ones(conn):
+    """Both salaries from the same employer land the same day under the same
+    description. Averaging the transactions would halve every payday."""
+    from datetime import timedelta
+    day = date(2026, 5, 1)
+    for _ in range(6):
+        add_txn(conn, day.isoformat(), 120000, "ACME PAYROLL", "Salary")
+        add_txn(conn, day.isoformat(), 90000, "ACME PAYROLL", "Salary")
+        day += timedelta(days=14)
+
+    stream = insights.pay_streams(conn, "2026-08")[0]
+    assert stream.cadence == "biweekly"          # not "weekly" from doubled rows
+    assert stream.typical_cents == 210000        # the two summed, not averaged
+    assert stream.varies is False
+
+
+def test_a_constant_stream_still_budgets_to_a_single_figure(conn):
+    varying(conn, [160000] * 6)
+    got = insights.expected_income(conn, "2026-08")
+    assert got["varies"] is False
+    assert got["low"] == got["total"] == got["high"]
