@@ -31,8 +31,10 @@ def dashboard(request: Request, conn=Depends(get_conn),
         "WHERE substr(t.date, 1, 7) = ? "
         "ORDER BY t.date DESC, t.id DESC LIMIT 8", (m,)).fetchall()
     has_any_txn = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] > 0
-    has_budget = conn.execute("SELECT COUNT(*) FROM budgets WHERE month = ?",
-                              (m,)).fetchone()[0] > 0
+    # From the summary, not the budgets table: a month that inherits its budget
+    # has no rows of its own, and asking the table said "no budget set" while
+    # the bars underneath were being measured against one.
+    has_budget = bool(summary.income_budget or summary.expense_budget)
     total_uncat = review.needs_category_count(conn)
     return render(
         request, conn, "dashboard.html",
@@ -40,6 +42,8 @@ def dashboard(request: Request, conn=Depends(get_conn),
         next_month=budgets.shift_month(m, 1),
         month_label=budgets.month_label(m), summary=summary, alerts=alerts,
         recent=recent, has_any_txn=has_any_txn, has_budget=has_budget,
+        budget_from_label=budgets.month_label(summary.budget_from)
+        if summary.budget_from else "",
         total_uncat=total_uncat,
         to_confirm=splits_svc.pending_confirmation_count(conn),
         transfer_suggestions=transfers.suggestion_count(conn),

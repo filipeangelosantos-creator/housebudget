@@ -105,6 +105,10 @@
   <div class="grow">No budget set for {{ month_label }} yet.</div>
   <a class="btn small" href="/budgets?month={{ month }}">Set budget</a>
 </div>
+{% elif summary.budget_from %}
+<p class="small muted">Measured against the budget carried forward from
+  {{ budget_from_label }}. <a href="/budgets?month={{ month }}">Adjust it for
+  {{ month_label }}</a>.</p>
 {% endif %}
 
 {% for group in summary.groups %}

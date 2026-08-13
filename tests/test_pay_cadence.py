@@ -6,6 +6,8 @@ cover the cadence detection and the month-by-month expectation built on it.
 """
 from datetime import date
 
+import pytest
+
 from app.services import budgets, insights
 
 from test_budgets_insights import add_txn, cat_id
@@ -240,3 +242,57 @@ def test_a_constant_stream_still_budgets_to_a_single_figure(conn):
     got = insights.expected_income(conn, "2026-08")
     assert got["varies"] is False
     assert got["low"] == got["total"] == got["high"]
+
+
+# --- the dashboard must agree with itself about the budget --------------------
+
+@pytest.fixture()
+def signed_in(web):
+    web.post("/setup", data={"username": "tester", "password": "password12",
+                             "password2": "password12"})
+    return web
+
+
+def test_an_inherited_budget_is_not_reported_as_no_budget(signed_in):
+    """Regression: the dashboard asked the budgets table, which has no rows for
+    a month that inherits, so it said "No budget set" directly above bars being
+    measured against that very budget."""
+    from app import config, db
+    conn = db.connect(config.DB_PATH)
+    groceries = cat_id(conn, "Groceries")
+    budgets.set_budget(conn, groceries, "2026-06", 70000)
+    conn.commit()
+    add_txn(conn, "2026-08-02", -50000, "market", "Groceries")
+    conn.close()
+
+    r = signed_in.get("/?month=2026-08")
+    assert "No budget set" not in r.text
+    assert "$700.00" in r.text                       # the bar is measured
+    assert "carried forward from" in r.text          # and says where it came from
+    assert "June 2026" in r.text
+
+
+def test_a_month_with_no_budget_anywhere_still_says_so(signed_in):
+    from app import config, db
+    conn = db.connect(config.DB_PATH)
+    add_txn(conn, "2026-08-02", -50000, "market", "Groceries")
+    conn.close()
+
+    r = signed_in.get("/?month=2026-08")
+    assert "No budget set for August 2026" in r.text
+
+
+def test_a_months_own_budget_is_not_called_carried_forward(signed_in):
+    from app import config, db
+    conn = db.connect(config.DB_PATH)
+    groceries = cat_id(conn, "Groceries")
+    budgets.set_budget(conn, groceries, "2026-06", 70000)
+    budgets.set_budget(conn, groceries, "2026-08", 90000)
+    conn.commit()
+    add_txn(conn, "2026-08-02", -50000, "market", "Groceries")
+    conn.close()
+
+    r = signed_in.get("/?month=2026-08")
+    assert "No budget set" not in r.text
+    assert "carried forward from" not in r.text
+    assert "$900.00" in r.text
