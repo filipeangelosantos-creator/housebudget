@@ -82,6 +82,40 @@ def test_multi_page_statement_keeps_every_row():
     assert all("BIG BANK" not in r.description for r in rows)
 
 
+def test_card_statement_with_reference_numbers():
+    """Regression for the first real import, which produced dates from the
+    wrong column, descriptions containing the amount, and amounts in the
+    hundreds of septillions."""
+    st, rows = parsed(F.card_with_reference_numbers_and_no_spaces())
+    assert len(rows) == 5
+
+    # the reference number is its own column, so it stays out of both the
+    # description and the amount
+    assert st.mapping.amount_col is not None
+    header = st.rows[0]
+    assert "Reference" in " ".join(header)
+    for row in rows:
+        assert "82305096" not in row.description
+        assert abs(row.amount_cents) < 10_000_00       # no absurd magnitudes
+
+    assert rows[0].date == date(2026, 5, 30)           # transaction date, not post
+    assert rows[0].amount_cents == -2018
+    assert rows[0].description.startswith("AMAZON MARK")
+    assert rows[2].amount_cents == 8415
+    assert rows[-1].amount_cents == 22896
+
+    # words are recovered even though the PDF contains no space characters
+    assert "STOP & SHOP" in rows[2].description
+    assert "INTEREST CHARGE" in rows[-1].description
+
+
+def test_terms_and_conditions_page_is_not_mistaken_for_the_table_header():
+    rows = read_pdf_rows(F.card_with_reference_numbers_and_no_spaces())
+    header = rows[0]
+    assert "Account Information" not in " ".join(header)
+    assert "Date" in " ".join(header) and "Amount" in " ".join(header)
+
+
 def test_scanned_pdf_gives_an_actionable_message():
     with pytest.raises(ValueError, match="scan or photo"):
         load_statement("scan.pdf", F.scanned_like_no_text())

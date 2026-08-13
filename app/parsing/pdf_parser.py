@@ -46,6 +46,17 @@ COLUMN_TOLERANCE = 18.0     # points; amount right-edges within this share a col
 PHRASE_GAP = 8.0            # points; a wider gap starts a new heading
 WRAP_MAX_GAP = 20.0         # points; further below and it isn't a wrapped line
 MAX_DATE_COLUMNS = 2
+# Many statements draw text as positioned glyphs with no space characters at
+# all, so word breaks have to be inferred from gaps. A gap relative to the font
+# size splits "Refer to your Reward Guide" correctly where a fixed one glues it
+# into "Refer toyourReward Guide".
+X_TOLERANCE_RATIO = 0.15
+# A long run of digits ahead of the description is the bank's reference number.
+MIN_REFERENCE_DIGITS = 12
+
+
+def _is_reference(text: str) -> bool:
+    return text.isdigit() and len(text) >= MIN_REFERENCE_DIGITS
 
 
 def is_money(text: str) -> bool:
@@ -93,8 +104,8 @@ def _nearest(centers: list[float], value: float) -> int:
     return min(range(len(centers)), key=lambda i: abs(centers[i] - value))
 
 
-def _split_line(line: list[dict]) -> tuple[list[str], list[dict], list[dict]]:
-    """Split one line into (leading dates, description words, money words)."""
+def _split_line(line: list[dict]):
+    """Split one line into (dates, reference, description words, money words)."""
     money = [w for w in line if is_money(w["text"])]
     rest = [w for w in line if w not in money]
 
@@ -106,7 +117,12 @@ def _split_line(line: list[dict]) -> tuple[list[str], list[dict], list[dict]]:
             break
         dates.append(" ".join(w["text"] for w in rest[idx:idx + n]))
         idx += n
-    return dates, rest[idx:], money
+
+    reference = ""
+    if dates and idx < len(rest) and _is_reference(rest[idx]["text"]):
+        reference = rest[idx]["text"]
+        idx += 1
+    return dates, reference, rest[idx:], money
 
 
 def _document_year(pages_text: str) -> str | None:
@@ -117,15 +133,24 @@ def _document_year(pages_text: str) -> str | None:
     return full.most_common(1)[0][0]
 
 
-def _header_line(lines: list[list[dict]]) -> list[dict] | None:
-    """The line that names the columns, if the statement has one."""
+def _header_line(lines: list[list[dict]], above_top: float) -> list[dict] | None:
+    """The line naming the columns of the transaction table.
+
+    It must sit above the first transaction on the same page and name both a
+    date and a money column. Statements carry pages of terms and conditions
+    whose prose otherwise scores as a header.
+    """
     from .csv_parser import _header_role
     best, best_score = None, 0
-    for line in lines[:25]:
+    for line in lines:
+        if line[0]["top"] >= above_top:
+            break
         if any(is_money(w["text"]) for w in line):
             continue
         roles = {r for r in (_header_role(w["text"]) for w in line) if r}
-        if len(roles) >= 2 and len(roles) > best_score:
+        if "date" not in roles or not roles & {"amount", "debit", "credit"}:
+            continue
+        if len(roles) > best_score:
             best, best_score = line, len(roles)
     return best
 
@@ -142,7 +167,10 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     all_text: list[str] = []
     with pdfplumber.open(io.BytesIO(data)) as pdf:
         for page in pdf.pages:
-            words = page.extract_words(use_text_flow=False, keep_blank_chars=False)
+            try:
+                words = page.extract_words(x_tolerance_ratio=X_TOLERANCE_RATIO)
+            except TypeError:      # pdfplumber older than 0.11
+                words = page.extract_words()
             pages.append(_group_lines(words))
             all_text.append(page.extract_text() or "")
 
@@ -152,14 +180,17 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
             "Ask your bank for a CSV, Excel or OFX export instead.")
 
     # Pass 1: find the transaction lines and where the amount columns sit.
-    parsed: list[tuple[int, list[str], list[dict], list[dict]]] = []
+    parsed: list = []
     money_edges: list[float] = []
+    first_txn: tuple[int, float] | None = None
     for page_no, lines in enumerate(pages):
         for line in lines:
-            dates, desc_words, money = _split_line(line)
+            dates, reference, desc_words, money = _split_line(line)
             if dates and money:
-                parsed.append((page_no, dates, desc_words, money))
+                parsed.append((page_no, dates, reference, desc_words, money))
                 money_edges.extend(w["x1"] for w in money)
+                if first_txn is None:
+                    first_txn = (page_no, line[0]["top"])
 
     if not parsed:
         raise ValueError(
@@ -167,7 +198,8 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
             "the layout may need a tweak — or use a CSV/Excel export instead.")
 
     columns = _cluster(money_edges, COLUMN_TOLERANCE)
-    n_dates = min(MAX_DATE_COLUMNS, max(len(d) for _, d, _, _ in parsed))
+    n_dates = min(MAX_DATE_COLUMNS, max(len(p[1]) for p in parsed))
+    has_reference = any(p[2] for p in parsed)
     year = _document_year(" ".join(all_text))
 
     # Pass 2: build the grid, folding wrapped description lines into their row.
@@ -175,12 +207,14 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     row_index_by_line: dict[tuple[int, int], int] = {}
     for page_no, lines in enumerate(pages):
         for line_no, line in enumerate(lines):
-            dates, desc_words, money = _split_line(line)
+            dates, reference, desc_words, money = _split_line(line)
             if not (dates and money):
                 continue
             cells = list(dates[:n_dates]) + [""] * (n_dates - len(dates[:n_dates]))
             if year and cells and cells[0] and not _has_year(cells[0]):
                 cells[0] = f"{cells[0]} {year}"
+            if has_reference:
+                cells.append(reference)
             description = " ".join(w["text"] for w in desc_words).strip()
             cells.append(description)
             amounts = [""] * len(columns)
@@ -190,13 +224,14 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
             row_index_by_line[(page_no, line_no)] = len(rows)
             rows.append(cells)
 
-    _attach_wrapped_descriptions(pages, rows, row_index_by_line, n_dates)
+    desc_index = n_dates + (1 if has_reference else 0)
+    _attach_wrapped_descriptions(pages, rows, row_index_by_line, desc_index)
 
-    header = _build_header(pages, columns, n_dates)
+    header = _build_header(pages, columns, n_dates, has_reference, first_txn)
     return ([header] + rows) if header else rows
 
 
-def _attach_wrapped_descriptions(pages, rows, row_index_by_line, n_dates) -> None:
+def _attach_wrapped_descriptions(pages, rows, row_index_by_line, desc_index) -> None:
     """Join a description that continued onto the following line.
 
     Only the line immediately below a transaction, and only when it sits close
@@ -217,13 +252,14 @@ def _attach_wrapped_descriptions(pages, rows, row_index_by_line, n_dates) -> Non
             if line[0]["top"] - last_top > WRAP_MAX_GAP:
                 last_row = None          # too far below to belong to that row
                 continue
-            dates, desc_words, money = _split_line(line)
+            dates, _reference, desc_words, money = _split_line(line)
             if dates or money or not desc_words:
                 last_row = None          # a summary or a new block, not a wrap
                 continue
             extra = " ".join(w["text"] for w in desc_words).strip()
             if extra:
-                rows[last_row][n_dates] = (rows[last_row][n_dates] + " " + extra).strip()
+                rows[last_row][desc_index] = (
+                    rows[last_row][desc_index] + " " + extra).strip()
             last_row = None              # only ever fold in one extra line
 
 
@@ -240,13 +276,13 @@ def _phrases(line: list[dict]) -> list[dict]:
              "x0": g[0]["x0"], "x1": g[-1]["x1"]} for g in groups]
 
 
-def _build_header(pages, columns: list[float], n_dates: int) -> list[str] | None:
+def _build_header(pages, columns: list[float], n_dates: int, has_reference: bool,
+                  first_txn: tuple[int, float] | None) -> list[str] | None:
     """Emit the statement's own column names in the same slots as the data."""
-    line = None
-    for lines in pages:
-        line = _header_line(lines)
-        if line:
-            break
+    if first_txn is None:
+        return None
+    page_no, txn_top = first_txn
+    line = _header_line(pages[page_no], txn_top)
     if not line:
         return None
 
@@ -267,9 +303,11 @@ def _build_header(pages, columns: list[float], n_dates: int) -> list[str] | None
             amount_names[i] = headings[best]["text"]
 
     leading = [h["text"] for j, h in enumerate(headings) if j not in used]
-    dates = leading[:n_dates] + [""] * max(0, n_dates - len(leading))
-    description = " ".join(leading[n_dates:]).strip() or "Description"
-    header = dates[:n_dates] + [description] + amount_names
+    dates = (leading[:n_dates] + [""] * max(0, n_dates - len(leading)))[:n_dates]
+    remaining = leading[n_dates:]
+    reference = [remaining.pop(0) if remaining else "Reference"] if has_reference else []
+    description = " ".join(remaining).strip() or "Description"
+    header = dates + reference + [description] + amount_names
     return header if any(h.strip() for h in header) else None
 
 

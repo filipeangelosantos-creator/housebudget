@@ -196,6 +196,73 @@ def two_pages() -> bytes:
     return buf.getvalue()
 
 
+def card_with_reference_numbers_and_no_spaces() -> bytes:
+    """A US card statement in the shape that broke the first real import:
+
+    * pages of terms and conditions before the transactions;
+    * a Reference Number column of 23-digit identifiers;
+    * two date columns;
+    * text drawn with no space characters at all, so word breaks have to be
+      inferred from the gaps between glyphs.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+
+    def glued(x, y, text, size=8):
+        """Draw with the spaces removed but the glyph positions preserved,
+        which is what a statement with no space characters looks like."""
+        c.setFont("Helvetica", size)
+        cursor = x
+        for ch in text:
+            if ch != " ":
+                c.drawString(cursor, y, ch)
+            cursor += c.stringWidth(ch, "Helvetica", size)
+
+    # page 1: legal prose whose wording otherwise scores as a table header
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, H - 60, "Important Information")
+    glued(50, H - 90, "Billing Rights Summary  What to do if you find a mistake")
+    glued(50, H - 105, "- Account Information: Your name and account number.")
+    glued(50, H - 120, "- Description of Problem: describe what you believe is wrong.")
+    glued(50, H - 135, "- Dollar amount: The dollar amount of the suspected error.")
+    c.showPage()
+
+    # page 2: the transactions
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, H - 55, "Account Activity")
+    y = H - 85
+    c.setFont("Helvetica-Bold", 8)
+    glued(50, y, "TransactionDate", 8)
+    glued(125, y, "PostDate", 8)
+    glued(180, y, "ReferenceNumber", 8)
+    glued(300, y, "TransactionDescription", 8)
+    _draw_right(c, 545, y, "Amount")
+
+    rows = [
+        ("05/30/2026", "06/01/2026", "82305096151500049323763",
+         "AMAZON MARK* BF1B08JA1 SEATTLE WA", "-20.18"),
+        ("05/30/2026", "06/01/2026", "82305096151500049283686",
+         "AMAZON MARK* BF5CD44F1 SEATTLE WA", "-42.49"),
+        ("06/02/2026", "06/03/2026", "55432866154204658763928",
+         "STOP & SHOP 0049 WATERTOWN MA", "84.15"),
+        ("06/13/2026", "06/15/2026", "02305376165000582323492",
+         "CVS/PHARMACY #00107 NEWTONVILLE MA", "26.33"),
+        ("06/16/2026", "06/16/2026", "", "INTEREST CHARGE-PURCHASES", "228.96"),
+    ]
+    y -= 18
+    for tdate, pdate, ref, desc, amount in rows:
+        glued(50, y, tdate)
+        glued(125, y, pdate)
+        if ref:
+            glued(180, y, ref)
+        glued(300, y, desc)
+        c.setFont("Helvetica", 8)
+        _draw_right(c, 545, y, amount)
+        y -= 14
+    c.save()
+    return buf.getvalue()
+
+
 def scanned_like_no_text() -> bytes:
     """A page with no extractable text, standing in for a scanned statement."""
     buf = io.BytesIO()

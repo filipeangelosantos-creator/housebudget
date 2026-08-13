@@ -38,6 +38,30 @@ def test_non_amounts():
     assert parse_amount("--") is None
 
 
+def test_text_containing_digits_is_not_an_amount():
+    """Regression: digits were harvested out of descriptions, which let a
+    description column be chosen as the amount column and produced amounts in
+    the hundreds of septillions."""
+    for text in ("82305096151500049323763 AMAZONMARK*BF1B08JA1 SEATTLE WA",
+                 "REF 12345", "AMAZON MARK* BF1B08JA1", "STOP & SHOP 0049",
+                 "CVS/PHARMACY #00107 NEWTONVILLE MA", "INTEREST CHARGE-PURCHASES",
+                 "Acct ending 3091", "12 Main St"):
+        assert parse_amount(text) is None, text
+
+
+def test_currency_codes_and_symbols_are_tolerated():
+    assert parse_amount("USD 12.34") == 1234
+    assert parse_amount("12,34 EUR") == 1234
+    assert parse_amount("£1,234.56") == 123456
+    assert parse_amount("1'234.56") == 123456        # Swiss grouping
+
+
+def test_cents_are_exact_for_large_values():
+    """Money is parsed with Decimal, so nothing is lost to binary floats."""
+    assert parse_amount("8230509615150004.93") == 823050961515000493
+    assert parse_amount("0.145") == 15                # half-up, not banker's
+
+
 def test_dates():
     assert parse_date("2026-08-03") == date(2026, 8, 3)
     assert parse_date("20260803") == date(2026, 8, 3)

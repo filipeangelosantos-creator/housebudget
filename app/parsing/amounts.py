@@ -1,11 +1,20 @@
 """Tolerant parsing of money amounts and dates as found in bank exports."""
 import re
 from datetime import date, datetime
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 
 from dateutil import parser as dateparser
 
-_CURRENCY_JUNK = re.compile(r"[^\d,.\-+()]")
 _DR_CR = re.compile(r"\b(DR|DB|CR)\b\.?$", re.IGNORECASE)
+_CURRENCY_SYMBOLS = "€$£¥₹₽₩¢₪₫₴₺R"
+# A three-letter currency code sitting beside the figure: "USD 12.34", "12,34 EUR".
+_CURRENCY_CODE = re.compile(
+    r"^(usd|eur|gbp|chf|jpy|cad|aud|nzd|brl|sek|nok|dkk|pln|czk|huf|ron|"
+    r"try|zar|mxn|inr|cny|hkd|sgd)\b|"
+    r"\b(usd|eur|gbp|chf|jpy|cad|aud|nzd|brl|sek|nok|dkk|pln|czk|huf|ron|"
+    r"try|zar|mxn|inr|cny|hkd|sgd)$", re.IGNORECASE)
+# What may remain once symbols and codes are gone: digits and separators only.
+_NUMERIC_ONLY = re.compile(r"^[\d.,'’]*$")
 
 
 def parse_amount(raw) -> int | None:
@@ -28,6 +37,7 @@ def parse_amount(raw) -> int | None:
         if m.group(1).upper() in ("DR", "DB"):
             sign = -1
         text = text[: m.start()].strip()
+    text = _CURRENCY_CODE.sub("", text).strip()
     text = text.replace("\xa0", " ").replace(" ", "")
     if text.startswith("(") and text.endswith(")"):
         sign = -sign
@@ -40,9 +50,13 @@ def parse_amount(raw) -> int | None:
         text = text[1:]
     elif text.startswith("+"):
         text = text[1:]
-    text = _CURRENCY_JUNK.sub("", text)
-    if not text or not re.search(r"\d", text):
+    text = "".join(ch for ch in text if ch not in _CURRENCY_SYMBOLS)
+    # Anything with letters left in it is a description, not an amount. Without
+    # this, "REF 12345 SEATTLE WA" would have its digits harvested into a
+    # number and a description column could be chosen as the amount column.
+    if not text or not _NUMERIC_ONLY.match(text) or not re.search(r"\d", text):
         return None
+    text = text.replace("'", "").replace("’", "")   # 1'234.56 (CH)
 
     has_dot, has_comma = "." in text, "," in text
     if has_dot and has_comma:
@@ -66,16 +80,23 @@ def parse_amount(raw) -> int | None:
         _, _, frac = text.rpartition(".")
         if len(frac) == 3 and _valid_grouping(text, "."):
             text = text.replace(".", "")
+    # Decimal, not float: cents must be exact, and a long digit run from a
+    # reference number would otherwise come back subtly altered.
     try:
-        value = float(text)
-    except (TypeError, ValueError):
+        value = Decimal(text)
+    except (InvalidOperation, TypeError, ValueError):
         return None
-    return sign * round(value * 100)
+    cents = (value * 100).to_integral_value(rounding=ROUND_HALF_UP)
+    return sign * int(cents)
 
 
 def _valid_grouping(text: str, sep: str) -> bool:
+    """Whether `sep` is being used as a thousands separator here."""
     parts = text.split(sep)
     if len(parts[0]) == 0 or len(parts[0]) > 3:
+        return False
+    # "0.145" is 0.145, never 145: a grouped number has no leading-zero group.
+    if parts[0].startswith("0"):
         return False
     return all(len(p) == 3 for p in parts[1:])
 

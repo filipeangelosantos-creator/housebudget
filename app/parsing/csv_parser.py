@@ -33,6 +33,10 @@ HEADER_KEYWORDS = {
                "money in", "paid in", "abono", "entrada", "haber", "in"],
     "balance": ["balance", "saldo", "running balance", "solde",
                 "saldo contabilistico", "saldo disponivel"],
+    # An identifier, not a description and definitely not an amount.
+    "reference": ["reference number", "reference no", "reference", "referencia",
+                  "referência", "ref no", "ref.", "auth code", "authorisation",
+                  "authorization", "transaction id", "trans id", "confirmation"],
 }
 
 
@@ -101,7 +105,7 @@ def _header_role(cell: str) -> str | None:
     h = _norm_header(cell)
     if not h:
         return None
-    for role in ("balance", "debit", "credit", "amount", "date", "desc"):
+    for role in ("balance", "reference", "debit", "credit", "amount", "date", "desc"):
         for kw in HEADER_KEYWORDS[role]:
             if h == kw or h.startswith(kw + " ") or (len(kw) > 3 and kw in h):
                 return role
@@ -162,9 +166,13 @@ def guess_mapping(rows: list[list]) -> Mapping:
     m.date_col = date_candidates[0] if date_candidates else 0
 
     # --- amount column(s)
-    balance_cols = {i for i, r in roles.items() if r == "balance"}
+    # Balances and reference numbers are numeric but are not the transaction
+    # amount; a long digit run with no decimal part is an identifier.
+    skip_cols = {i for i, r in roles.items() if r in ("balance", "reference")}
+    skip_cols |= {col for col in range(width)
+                  if _looks_like_identifier(sample, col)}
     amount_candidates = [i for i, s in amount_scores.items()
-                         if s >= 0.6 and i != m.date_col and i not in balance_cols]
+                         if s >= 0.6 and i != m.date_col and i not in skip_cols]
     debit_hint = [i for i, r in roles.items() if r == "debit" and i in amount_candidates]
     credit_hint = [i for i, r in roles.items() if r == "credit" and i in amount_candidates]
     amount_hint = [i for i, r in roles.items() if r == "amount" and i in amount_candidates]
@@ -178,7 +186,7 @@ def guess_mapping(rows: list[list]) -> Mapping:
         m.amount_col = amount_candidates[0]
 
     # --- description column(s): longest text columns
-    used = {m.date_col, m.amount_col, m.debit_col, m.credit_col} | balance_cols
+    used = {m.date_col, m.amount_col, m.debit_col, m.credit_col} | skip_cols
     desc_hinted = [i for i, r in roles.items() if r == "desc" and i not in used]
     if desc_hinted:
         m.desc_cols = desc_hinted[:2]
@@ -200,6 +208,20 @@ def guess_mapping(rows: list[list]) -> Mapping:
     if inferred is not None:
         m.dayfirst = inferred
     return m
+
+
+def _looks_like_identifier(sample: list[list], col: int) -> bool:
+    """A column of long digit runs with no decimal part: a reference number,
+    not money. Money on a statement carries a decimal separator."""
+    values = []
+    for row in sample:
+        cell = row[col] if col < len(row) else None
+        if cell not in (None, ""):
+            values.append(str(cell).strip())
+    if len(values) < 3:
+        return False
+    identifiers = sum(1 for v in values if v.isdigit() and len(v) >= 10)
+    return identifiers / len(values) >= 0.7
 
 
 def _complementary(sample: list[list], pair: list[int]) -> bool:
