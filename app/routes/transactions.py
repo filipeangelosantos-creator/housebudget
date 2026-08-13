@@ -269,21 +269,51 @@ def review_page(request: Request, conn=Depends(get_conn), user=Depends(current_u
                   categories=_categories_grouped(conn))
 
 
+def _apply_review_choice(conn, txn_id: int, category_id: int,
+                         remember: bool, pattern: str) -> None:
+    txn = conn.execute("SELECT description FROM transactions WHERE id = ?",
+                       (txn_id,)).fetchone()
+    if txn is None:
+        return
+    conn.execute(
+        "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
+        (category_id, txn_id))
+    conn.commit()
+    if remember:
+        p = pattern.strip() or classify.suggest_pattern(txn["description"])
+        rule_id = classify.create_rule(conn, p, category_id)
+        conn.commit()
+        classify.apply_rules_to_uncategorized(conn, only_rule_id=rule_id)
+
+
+@router.post("/review/save", dependencies=[Depends(verify_csrf)])
+async def review_save(request: Request, conn=Depends(get_conn),
+                      user=Depends(current_user)):
+    """One submit for the whole queue. `only=<id>` saves a single row (the
+    per-row button); `only=all` saves every row that has a category chosen."""
+    form = await request.form()
+    only = str(form.get("only", "all"))
+    for key in form.keys():
+        if not key.startswith("cat_"):
+            continue
+        txn_id = key[4:]
+        if not txn_id.isdigit() or (only != "all" and txn_id != only):
+            continue
+        value = str(form.get(key, ""))
+        if not value.isdigit():
+            continue
+        _apply_review_choice(
+            conn, int(txn_id), int(value),
+            remember=bool(form.get(f"remember_{txn_id}")),
+            pattern=str(form.get(f"pattern_{txn_id}", "")))
+    return RedirectResponse("/review", status_code=303)
+
+
 @router.post("/review/{txn_id}", dependencies=[Depends(verify_csrf)])
 def review_submit(txn_id: int, request: Request, conn=Depends(get_conn),
                   user=Depends(current_user), category_id: str = Form(""),
                   remember: str = Form(""), pattern: str = Form("")):
-    txn = _txn_or_404(conn, txn_id)
-    if not category_id.isdigit():
-        return RedirectResponse("/review", status_code=303)
-    cat = int(category_id)
-    conn.execute(
-        "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
-        (cat, txn_id))
-    conn.commit()
-    if remember:
-        p = pattern.strip() or classify.suggest_pattern(txn["description"])
-        rule_id = classify.create_rule(conn, p, cat)
-        conn.commit()
-        classify.apply_rules_to_uncategorized(conn, only_rule_id=rule_id)
+    _txn_or_404(conn, txn_id)
+    if category_id.isdigit():
+        _apply_review_choice(conn, txn_id, int(category_id), bool(remember), pattern)
     return RedirectResponse("/review", status_code=303)

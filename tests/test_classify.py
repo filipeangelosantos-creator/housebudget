@@ -13,14 +13,34 @@ def run(conn, desc):
 
 def test_merchant_key_strips_noise():
     assert classify.merchant_key("STARBUCKS #1234 SEATTLE") == "STARBUCKS SEATTLE"
-    assert classify.merchant_key("AMZN MKTP US*Z12AB3") == "AMZN MKTP"
+    assert classify.merchant_key("AMZN MKTP US*Z12AB3") == "AMZN MKTP US"
     assert classify.merchant_key("POS DEBIT WALMART 4421") == "WALMART"
     assert classify.merchant_key("PAYPAL *SPOTIFY 12345") == "PAYPAL SPOTIFY"
+
+
+def test_merchant_survives_glued_reference():
+    """Regression: ONEQUINCE*Q28484714 SANFRANCISCOCA lost its merchant to the
+    digit filter, leaving the CITY as the key — and 'always file
+    SANFRANCISCOCA here' as the suggested rule."""
+    key = classify.merchant_key("ONEQUINCE*Q28484714 SANFRANCISCOCA")
+    assert key.startswith("ONEQUINCE")
+    assert classify.suggest_pattern("ONEQUINCE*Q28484714 SANFRANCISCOCA") == "ONEQUINCE"
+    # same joiner style with '#'
+    assert classify.merchant_key("TJMAXX#0569 BROOKLINE MA").startswith("TJMAXX")
 
 
 def test_suggest_pattern():
     assert classify.suggest_pattern("STARBUCKS #1234 SEATTLE") == "STARBUCKS"
     assert classify.suggest_pattern("KFC 0231 LISBON") == "KFC LISBON"
+
+
+def test_suggest_pattern_never_bare_aggregator():
+    """A rule on 'GOOGLE' or 'PAYPAL' alone would swallow half the statement."""
+    assert classify.suggest_pattern("GOOGLE*LinkedInCommu MOUNTAINVIEWCA") == \
+        "GOOGLE LINKEDINCOMMU"
+    assert classify.suggest_pattern("PAYPAL *SPOTIFY 12345") == "PAYPAL SPOTIFY"
+    assert classify.suggest_pattern("MED*BETHISRAELLAHEY CAMBRIDGE MA") == \
+        "MED BETHISRAELLAHEY"
 
 
 def test_seed_rules_specificity(conn):

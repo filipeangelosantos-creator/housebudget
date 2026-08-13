@@ -334,6 +334,16 @@ button.linklike { background: none; border: none; color: var(--accent);
               font-size: 14px; padding: 4px 0; }
 .split-line .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+/* --- review save-all bar ------------------------------------------------- */
+.save-all-bar {
+  position: sticky; bottom: calc(var(--nav-h) + 8px); z-index: 15;
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 10px 14px; margin: 12px 0;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+}
+@media (min-width: 800px) { .save-all-bar { bottom: 12px; } }
+
 /* --- transfer pairs ------------------------------------------------------ */
 .transfer-pair { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }
 .transfer-side { flex: 1; min-width: 0; font-size: 14px; }

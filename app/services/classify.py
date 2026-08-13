@@ -26,17 +26,31 @@ def normalize_desc(desc: str) -> str:
 
 
 def merchant_key(desc: str) -> str:
-    """Stable key for grouping the same merchant across transactions:
-    drop tokens containing digits (store #, refs, dates) and noise words."""
+    """Stable key for grouping the same merchant across transactions.
+
+    Card processors glue a reference onto the merchant name in one token —
+    ONEQUINCE*Q28484714, TJMAXX#0569 — so tokens are split on those joiners
+    *before* digit-bearing parts are dropped. Doing it the other way around
+    discarded the merchant and left only the city as the key.
+    """
     tokens = []
     for tok in normalize_desc(desc).split(" "):
-        if _HAS_DIGIT.search(tok):
-            continue
-        cleaned = _PUNCT.sub("", tok.replace("*", " ")).strip()
-        for part in cleaned.split():
-            if part and part not in NOISE_TOKENS and len(part) > 1:
-                tokens.append(part)
+        for piece in re.split(r"[*#]", tok):
+            if not piece or _HAS_DIGIT.search(piece):
+                continue
+            cleaned = _PUNCT.sub("", piece).strip()
+            if cleaned and cleaned not in NOISE_TOKENS and len(cleaned) > 1:
+                tokens.append(cleaned)
     return " ".join(tokens[:6]) if tokens else normalize_desc(desc)[:40]
+
+
+# Processor/platform prefixes that appear before the actual merchant name.
+# A rule on the prefix alone would match half the card statement.
+AGGREGATOR_PREFIXES = {
+    "PAYPAL", "GOOGLE", "AMZN", "AMAZON", "APPLE.COM", "SQ", "SP", "TST",
+    "MED", "IC", "PP", "CKE", "DD", "EB", "ZSK", "CLOVER", "STRIPE", "WIX",
+    "SHOPIFY", "FSP", "PY", "LSK", "MKTPL",
+}
 
 
 def suggest_pattern(desc: str) -> str:
@@ -45,6 +59,9 @@ def suggest_pattern(desc: str) -> str:
     tokens = key.split(" ")
     if not tokens or not tokens[0]:
         return key
+    # "GOOGLE LINKEDINCOMMU" must not become a rule on "GOOGLE"
+    if tokens[0] in AGGREGATOR_PREFIXES and len(tokens) >= 2:
+        return " ".join(tokens[:2])
     if len(tokens[0]) >= 4:
         return tokens[0]
     return " ".join(tokens[:2])

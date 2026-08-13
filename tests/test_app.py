@@ -74,14 +74,14 @@ def test_full_journey():
         assert "Groceries" in r.text          # auto-categorized spending visible
         assert "need" in r.text               # uncategorized banner (Luigi's Deli)
 
-        # Review queue: categorize Luigi's and learn a rule
+        # Review queue: categorize Luigi's via the per-row save and learn a rule
         r = client.get("/review")
         assert "LUIGI" in r.text
-        txn_id = re.search(r'action="/review/(\d+)"', r.text).group(1)
-        r = client.post(f"/review/{txn_id}", data={
-            "csrf": get_csrf(r.text),
-            "category_id": str(cat_id("Restaurants & Takeout")),
-            "remember": "1", "pattern": "LUIGIS DELI"})
+        txn_id = re.search(r'name="cat_(\d+)"', r.text).group(1)
+        r = client.post("/review/save", data={
+            "csrf": get_csrf(r.text), "only": txn_id,
+            f"cat_{txn_id}": str(cat_id("Restaurants & Takeout")),
+            f"remember_{txn_id}": "1", f"pattern_{txn_id}": "LUIGIS DELI"})
         conn = db.connect(config.DB_PATH)
         rule = conn.execute("SELECT * FROM rules WHERE pattern = 'LUIGIS DELI'").fetchone()
         assert rule is not None and rule["source"] == "learned"
@@ -160,6 +160,33 @@ def test_full_journey():
         # Splitting is visible on the dashboard budget bars
         r = client.get("/?month=2026-08")
         assert "Clothing" in r.text
+
+        # Batch save: two manual uncategorized transactions from one merchant,
+        # both saved in a single submit; remember on one creates one rule.
+        r = client.get("/transactions/new")
+        csrf = get_csrf(r.text)
+        for day, amt in (("2026-08-03", "12.00"), ("2026-08-04", "15.00")):
+            client.post("/transactions/new", data={
+                "csrf": csrf, "account_id": "1", "txn_date": day,
+                "amount": amt, "direction": "expense",
+                "description": "CORNER BAKERY 774"})
+        r = client.get("/review")
+        ids = re.findall(r'name="cat_(\d+)"', r.text)
+        assert len(ids) >= 2
+        payload = {"csrf": get_csrf(r.text), "only": "all"}
+        for i in ids:
+            payload[f"cat_{i}"] = str(cat_id("Coffee & Snacks"))
+            payload[f"pattern_{i}"] = "CORNER BAKERY"
+        payload[f"remember_{ids[0]}"] = "1"
+        r = client.post("/review/save", data=payload)
+        conn = db.connect(config.DB_PATH)
+        left = conn.execute("SELECT COUNT(*) FROM transactions "
+                            "WHERE category_id IS NULL").fetchone()[0]
+        nrules = conn.execute("SELECT COUNT(*) FROM rules "
+                              "WHERE pattern = 'CORNER BAKERY'").fetchone()[0]
+        conn.close()
+        assert left == 0
+        assert nrules == 1
 
         # Every remaining page renders
         conn = db.connect(config.DB_PATH)

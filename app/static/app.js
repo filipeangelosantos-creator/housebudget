@@ -19,6 +19,38 @@
     }
   });
 
+  // Review queue: picking a category copies it to untouched rows from the
+  // same merchant, and the save-all bar counts what's chosen.
+  var reviewForm = document.getElementById("review-form");
+  if (reviewForm) {
+    var updateCount = function () {
+      var out = document.getElementById("chosen-count");
+      if (!out) return;
+      var n = 0;
+      reviewForm.querySelectorAll('select[name^="cat_"]').forEach(function (s) {
+        if (s.value) n += 1;
+      });
+      out.textContent = String(n);
+    };
+    reviewForm.addEventListener("change", function (e) {
+      var el = e.target;
+      if (!el.matches('select[name^="cat_"]')) return;
+      el.dataset.touched = "1";
+      var merchant = el.getAttribute("data-merchant");
+      if (merchant && el.value) {
+        reviewForm.querySelectorAll(
+          'select[data-merchant]:not([data-touched])').forEach(function (other) {
+          if (other !== el && other.getAttribute("data-merchant") === merchant
+              && !other.value) {
+            other.value = el.value;
+          }
+        });
+      }
+      updateCount();
+    });
+    updateCount();
+  }
+
   // On the import form: show chosen file name.
   var file = document.querySelector('input[type="file"][data-show-name]');
   if (file) {
