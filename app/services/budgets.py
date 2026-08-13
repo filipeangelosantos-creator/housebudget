@@ -37,7 +37,24 @@ def set_budget(conn, category_id: int, month: str, amount_cents: int) -> None:
 
 
 def copy_budgets(conn, from_month: str, to_month: str) -> int:
-    src = get_budgets(conn, from_month)
+    """Put one month's budget into another. Returns how many categories moved.
+
+    Reads the effective budget, so copying from a month that inherits copies
+    the figures you can see on it rather than the nothing its own row count
+    would suggest.
+
+    The target is cleared first. Merging the two would leave the destination
+    holding amounts from a month you didn't copy, in categories the source
+    never mentioned — a budget belonging to neither month.
+    """
+    if from_month == to_month:
+        return 0
+    src, _ = effective_budgets(conn, from_month)
+    if not src:
+        # Nothing to copy. Clearing the target anyway would make "copy from a
+        # month I never budgeted" a way to delete the budget I was looking at.
+        return 0
+    conn.execute("DELETE FROM budgets WHERE month = ?", (to_month,))
     for cat_id, cents in src.items():
         set_budget(conn, cat_id, to_month, cents)
     conn.commit()

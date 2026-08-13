@@ -11,7 +11,10 @@ router = APIRouter()
 
 @router.get("/budgets")
 def budgets_page(request: Request, conn=Depends(get_conn),
-                 user=Depends(current_user), month: str | None = None):
+                 user=Depends(current_user), month: str | None = None,
+                 copied: int | None = None, copied_from: str | None = None):
+    """`copied` / `copied_from` report the result of a copy that just ran, so
+    landing on a month that didn't change says why instead of looking broken."""
     m = clean_month(month)
     summary = budgets.month_summary(conn, m, include_empty=True)
     has_budget = any(l.budget for g in summary.groups for l in g.lines)
@@ -23,6 +26,11 @@ def budgets_page(request: Request, conn=Depends(get_conn),
                   prior_label=budgets.month_label(summary.budget_from)
                   if summary.budget_from else "",
                   summary=summary, has_budget=has_budget, prior_month=prior,
+                  prior_month_label=budgets.month_label(prior) if prior else "",
+                  copied=copied,
+                  copied_from=clean_month(copied_from) if copied_from else "",
+                  copied_from_label=budgets.month_label(clean_month(copied_from))
+                  if copied_from else "",
                   income=insights.expected_income(conn, m))
 
 
@@ -76,8 +84,17 @@ def budgets_use_expected(request: Request, conn=Depends(get_conn),
 def budgets_copy(request: Request, conn=Depends(get_conn),
                  user=Depends(current_user), month: str = Form(...),
                  from_month: str = Form(...)):
-    budgets.copy_budgets(conn, clean_month(from_month), clean_month(month))
-    return RedirectResponse(f"/budgets?month={clean_month(month)}", status_code=303)
+    """Copy a budget into `month` from `from_month`, in either direction.
+
+    The same endpoint serves both: pulling an older month in is a copy whose
+    target is this month, pushing this month forward is one whose source is.
+    Either way it lands on the month that changed, so the result is in front
+    of you rather than somewhere you have to go and check.
+    """
+    src, dest = clean_month(from_month), clean_month(month)
+    n = budgets.copy_budgets(conn, src, dest)
+    return RedirectResponse(f"/budgets?month={dest}&copied={n}&copied_from={src}",
+                            status_code=303)
 
 
 # --- categories --------------------------------------------------------------

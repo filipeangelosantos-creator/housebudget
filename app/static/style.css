@@ -249,10 +249,19 @@ svg [data-drill-kind][aria-expanded="true"] {
                    border-style: solid; }
 
 /* --- budget balance ------------------------------------------------------ */
-/* .pos / .neg carry the colour; this is only the weight and the rule above. */
+/* The verdict follows you down the page: the categories you scroll to edit are
+   exactly what changes it, and it is no use sitting at the top out of sight.
+   Sticky rather than a fixed bar revealed by script — it keeps its place in
+   the flow, so nothing below it jumps when it pins. .pos / .neg carry colour. */
+.bal-strip {
+  position: sticky; top: var(--top-h); z-index: 12;
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: 10px; padding: 9px 12px; margin: 0 0 10px;
+  font-size: 17px; font-weight: 650;
+  box-shadow: 0 6px 10px -8px rgba(0, 0, 0, 0.28);
+}
 .balance .spread { padding: 2px 0; }
-.bal-verdict { font-size: 17px; font-weight: 650; margin-top: 6px;
-               padding-top: 8px; border-top: 1px solid var(--border); }
+.balance { margin-top: 0; }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);

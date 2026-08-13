@@ -17,18 +17,18 @@
 {% set inc = summary.income_budget %}
 {% set base = inc if inc else income.total %}
 {% set gap = base - summary.expense_budget %}
+<div class="bal-strip {{ 'neg' if gap < 0 else 'pos' }}" id="bal-verdict">
+  {%- if not base %}Set a budget to see whether it fits your income
+  {%- elif gap > 0 %}{{ currency }}{{ gap|money }} left to allocate
+  {%- elif gap == 0 %}Every {{ currency }} of income is allocated
+  {%- else %}{{ currency }}{{ gap|money }} more than your income
+  {%- endif %}</div>
 <div class="card balance" id="balance" data-expected="{{ income.total }}"
      data-currency="{{ currency }}">
   <div class="spread"><span class="small muted">Planned income</span>
     <strong id="bal-income">{{ currency }}{{ inc|money }}</strong></div>
   <div class="spread"><span class="small muted">Planned spending</span>
     <strong id="bal-spending">{{ currency }}{{ summary.expense_budget|money }}</strong></div>
-  <div class="bal-verdict {{ 'neg' if gap < 0 else 'pos' }}" id="bal-verdict">
-    {%- if not base %}Set a budget to see whether it fits your income
-    {%- elif gap > 0 %}{{ currency }}{{ gap|money }} left to allocate
-    {%- elif gap == 0 %}Every {{ currency }} of income is allocated
-    {%- else %}{{ currency }}{{ gap|money }} more than your income
-    {%- endif %}</div>
   <p class="small muted" id="bal-note">
     {%- if not base %}Budget your income first, then your spending.
     {%- elif not inc and income.total %}No income budgeted yet, so this is measured
@@ -40,6 +40,16 @@
     {%- endif %}</p>
   <p class="small muted"><a href="/categories">Edit categories</a></p>
 </div>
+
+{% if copied is not none %}
+<div class="banner {{ 'warn' if copied == 0 }}">
+  <div class="grow">
+    {%- if copied %}Copied <strong>{{ copied }}</strong> categor{{ 'ies' if copied != 1 else 'y' }} from {{ copied_from_label }} into {{ month_label }}.
+    {%- elif copied_from == month %}That's the month you're already on — pick a different one to copy from.
+    {%- else %}Nothing to copy — no budget is set for {{ copied_from_label }} or any month before it, so {{ month_label }} is unchanged.
+    {%- endif %}</div>
+</div>
+{% endif %}
 
 {% if summary.budget_from %}
 <div class="banner">
@@ -132,5 +142,41 @@
     <button class="btn" type="submit">Save budget</button>
   </div>
 </form>
+
+{# A budget is mostly the same every month, so setting one up again from
+   scratch is work nobody should do twice. Both directions: pull an older
+   month in, or push this one out to a month you haven't set up yet. #}
+<details class="card">
+  <summary style="cursor:pointer; font-weight:600">Copy a budget between months</summary>
+  <p class="small muted">Whichever month you copy into is replaced by the
+  figures you copy — the two are not merged, so you never end up with a budget
+  that belongs to neither month.</p>
+
+  <form method="post" action="/budgets/copy"
+        data-confirm="Replace the budget for {{ month_label }}?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <label class="f">Copy into {{ month_label }} from</label>
+    <div class="form-row">
+      <input type="month" name="from_month" value="{{ prior_month or prev_month }}">
+      <button class="btn" type="submit" style="flex:0 0 auto">Copy in</button>
+    </div>
+    {% if prior_month %}
+    <p class="small muted">{{ prior_month_label }} is the most recent month you set a budget for.</p>
+    {% endif %}
+  </form>
+
+  <form method="post" action="/budgets/copy" style="margin-top:14px"
+        data-confirm="Replace that month's budget with {{ month_label }}'s?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="from_month" value="{{ month }}">
+    <label class="f">Copy {{ month_label }} out to</label>
+    <div class="form-row">
+      <input type="month" name="month" value="{{ next_month }}">
+      <button class="btn ghost" type="submit" style="flex:0 0 auto">Copy out</button>
+    </div>
+    <p class="small muted">You'll land on that month so you can check it.</p>
+  </form>
+</details>
 
 {% endblock %}

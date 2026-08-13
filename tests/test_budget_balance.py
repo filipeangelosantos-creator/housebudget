@@ -115,3 +115,116 @@ def test_a_carried_forward_budget_is_measured_the_same_way(signed_in):
     r = signed_in.get("/budgets?month=2026-08")
     assert "$1,800.00 left to allocate" in r.text
     assert "Carried forward from" in r.text
+
+
+# --- the verdict follows you down the page ------------------------------------
+
+def test_the_verdict_is_a_sticky_strip_not_a_line_at_the_top(signed_in):
+    """It answers a question about the inputs further down the page, so it has
+    to still be there when you scroll to them."""
+    budget(Salary=300000, Groceries=120000)
+    r = signed_in.get("/budgets?month=2026-08")
+    assert 'class="bal-strip pos" id="bal-verdict"' in r.text
+    # and it sits above the card it summarises, so reading order is verdict first
+    assert r.text.index('id="bal-verdict"') < r.text.index('id="balance"')
+
+
+# --- copying a budget from one month to another -------------------------------
+
+def get_csrf(html):
+    import re
+    m = re.search(r'name="csrf" value="([^"]+)"', html)
+    assert m
+    return m.group(1)
+
+
+def copy(client, into, frm):
+    page = client.get(f"/budgets?month={into}")
+    return client.post("/budgets/copy", data={
+        "csrf": get_csrf(page.text), "month": into, "from_month": frm},
+        follow_redirects=True)
+
+
+def amounts(month):
+    conn = db.connect(config.DB_PATH)
+    got = {conn.execute("SELECT name FROM categories WHERE id = ?",
+                        (cat,)).fetchone()["name"]: cents
+           for cat, cents in budgets.get_budgets(conn, month).items()}
+    conn.close()
+    return got
+
+
+def test_copying_an_earlier_month_forward(signed_in):
+    budget("2026-06", Groceries=60000, Fuel=20000)
+    r = copy(signed_in, "2026-08", "2026-06")
+    assert amounts("2026-08") == {"Groceries": 60000, "Fuel": 20000}
+    assert "Copied" in r.text and "June 2026" in r.text
+
+
+def test_copying_this_month_backwards(signed_in):
+    """Both directions: a statement imported late needs a budget for a month
+    that has already gone by."""
+    budget("2026-08", Groceries=70000)
+    r = copy(signed_in, "2026-05", "2026-08")
+    assert amounts("2026-05") == {"Groceries": 70000}
+    assert "May 2026" in r.text            # it lands on the month that changed
+
+
+def test_copying_replaces_rather_than_merges(signed_in):
+    """A merge leaves the target holding amounts from a month you didn't copy,
+    in categories the source never mentioned."""
+    budget("2026-06", Groceries=60000)
+    budget("2026-08", Fuel=99000, Groceries=10000)
+    copy(signed_in, "2026-08", "2026-06")
+    assert amounts("2026-08") == {"Groceries": 60000}      # no leftover Fuel
+
+
+def test_copying_from_a_month_that_inherited_copies_what_it_shows(signed_in):
+    """June's budget carries forward, so July shows it. Copying July must copy
+    those figures, not the nothing July has rows for."""
+    budget("2026-06", Groceries=60000)
+    conn = db.connect(config.DB_PATH)
+    assert budgets.get_budgets(conn, "2026-07") == {}       # no rows of its own
+    assert budgets.effective_budgets(conn, "2026-07")[0]    # but it shows June's
+    conn.close()
+
+    copy(signed_in, "2026-11", "2026-07")
+    assert amounts("2026-11") == {"Groceries": 60000}
+
+
+def test_copying_a_month_onto_itself_does_nothing(signed_in):
+    """The target is cleared before the copy, so a self-copy that went through
+    the motions would be a way to wipe the month you were looking at."""
+    budget("2026-08", Groceries=60000)
+    r = copy(signed_in, "2026-08", "2026-08")
+    assert amounts("2026-08") == {"Groceries": 60000}       # not wiped
+    assert "the month you're already on" in r.text
+
+
+def test_copying_from_an_empty_month_says_so_instead_of_looking_broken(signed_in):
+    budget("2026-08", Groceries=60000)
+    r = copy(signed_in, "2026-08", "2026-02")
+    assert "Nothing to copy" in r.text
+    assert "February 2026" in r.text
+    assert amounts("2026-08") == {"Groceries": 60000}       # and left alone
+
+
+def test_the_copy_panel_offers_both_directions(signed_in):
+    budget("2026-06", Groceries=60000)
+    r = signed_in.get("/budgets?month=2026-08")
+    assert "Copy a budget between months" in r.text
+    assert "Copy into August 2026 from" in r.text
+    assert "Copy August 2026 out to" in r.text
+    # the "from" box starts on the last month you actually budgeted
+    assert 'name="from_month" value="2026-06"' in r.text
+    assert "June 2026 is the most recent month you set a budget for" in r.text
+    # and the "to" box on the month after this one
+    assert 'name="month" value="2026-09"' in r.text
+
+
+def test_copying_needs_a_valid_token(signed_in):
+    budget("2026-06", Groceries=60000)
+    r = signed_in.post("/budgets/copy", data={
+        "csrf": "nope", "month": "2026-08", "from_month": "2026-06"})
+    assert r.status_code == 403
+    assert amounts("2026-08") == {}
