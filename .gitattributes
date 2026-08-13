@@ -1,0 +1,10 @@
+# Keep launcher scripts usable on the platform they belong to, whatever
+# core.autocrlf is set to locally.
+*.sh   text eol=lf
+*.bat  text eol=crlf
+Caddyfile text eol=lf
+
+# Never let git rewrite bytes inside test/sample statements or images.
+*.pdf  binary
+*.xlsx binary
+*.png  binary

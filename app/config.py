@@ -49,9 +49,9 @@ def get_secret_key() -> str:
     ensure_dirs()
     key_file = DATA_DIR / "secret.key"
     if key_file.exists():
-        return key_file.read_text().strip()
+        return key_file.read_text(encoding="utf-8").strip()
     key = secrets.token_hex(32)
-    key_file.write_text(key)
+    key_file.write_text(key, encoding="utf-8")
     try:
         key_file.chmod(0o600)
     except OSError:

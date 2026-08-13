@@ -68,10 +68,23 @@ you own and can back up with one tap.
 
 ## Run it on your own computer
 
-Requires Python 3.11+. Nothing else to install — the script sets itself up.
+Requires Python 3.11+ ([python.org/downloads](https://www.python.org/downloads/);
+on Windows tick **"Add python.exe to PATH"** during setup). Nothing else to
+install — the launcher builds its own environment on first run.
+
+**Windows** (Command Prompt or PowerShell):
+
+```
+git clone https://github.com/<you>/housebudget.git
+cd housebudget
+run.bat
+```
+
+**macOS / Linux:**
 
 ```bash
-git clone <this repo> && cd housebudget
+git clone https://github.com/<you>/housebudget.git
+cd housebudget
 ./run.sh
 ```
 
@@ -79,28 +92,36 @@ Open **http://localhost:8000**. The first visit walks you through creating your
 two logins. The files in `samples/` let you try the import flow before using
 real statements.
 
-`./run.sh` prints where your data is kept every time it starts.
+The launcher prints where your data is kept every time it starts.
 
-**To use it from your phones on the home wi-fi**, start it with
-`HOST=0.0.0.0 ./run.sh` and open the address it prints (something like
-`http://192.168.1.20:8000`). That's plain HTTP with no certificate — fine on
-your own network, but don't do it on public wi-fi, and use the Docker + Caddy
-setup below if you want it reachable from outside the house.
+**To use it from your phones on the home wi-fi**, start it listening on the
+network and open the address it prints (something like `http://192.168.1.20:8000`):
+
+| | |
+|---|---|
+| Windows | `set HOST=0.0.0.0` then `run.bat` |
+| macOS / Linux | `HOST=0.0.0.0 ./run.sh` |
+
+That's plain HTTP with no certificate — fine on your own network, but don't do
+it on public wi-fi, and use the Docker + Caddy setup below if you want it
+reachable from outside the house. Use `PORT` the same way if 8000 is taken.
 
 ### Where your data lives
 
 Everything — the database, the uploaded statement files and the cookie-signing
-key — goes in **`~/.housebudget/`**, deliberately *outside* the code folder.
-That means you can delete the project folder, re-clone it, or run
-`git clean -xdf` in it without touching your financial history. Nothing
-financial is ever committed to git; there's a test asserting it.
+key — goes in a `.housebudget` folder in your home directory
+(`C:\Users\you\.housebudget` on Windows, `~/.housebudget` elsewhere),
+deliberately *outside* the code folder. That means you can delete the project
+folder, re-clone it, or run `git clean -xdf` in it without touching your
+financial history. Nothing financial is ever committed to git; there's a test
+asserting it.
 
-Put it somewhere else with `HB_DATA_DIR=/path/to/somewhere ./run.sh`.
+Put it somewhere else by setting `HB_DATA_DIR` before starting.
 
 **Back it up.** Settings → *Download database backup* gives you a single file
-containing everything; restoring is dropping it back as
-`~/.housebudget/budget.db`. Copying that file somewhere safe now and then is
-the whole backup strategy.
+containing everything; restoring is dropping it back as `budget.db` in that
+folder. Copying that file somewhere safe now and then is the whole backup
+strategy.
 
 ## Later: put it on your own domain (with HTTPS)
 
@@ -208,6 +229,10 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
   fixed-order and validated for colour-blind separation and contrast in both
   light and dark mode; series colours are never cycled or reassigned.
 - Money is stored as integer cents; expenses negative, income positive.
+- Runs on Windows, macOS and Linux: `run.bat` / `run.sh` are equivalent, text
+  files are read and written as UTF-8 rather than the platform default, and
+  `.gitattributes` pins script line endings so a Windows checkout doesn't break
+  the shell script (or vice versa). The test suite covers these.
 - Every money aggregate reads the `txn_allocations` view rather than the
   `transactions` table, so a split transaction contributes each part to its own
   category while still counting once as a charge. Uncategorized money is

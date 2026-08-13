@@ -23,7 +23,7 @@ echo "  HouseBudget"
 echo "  ───────────"
 echo "  Open:   http://localhost:${PORT}"
 if [ "$HOST" = "0.0.0.0" ]; then
-  IP="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+  IP="$(.venv/bin/python -m app.hostinfo 2>/dev/null || true)"
   [ -n "${IP:-}" ] && echo "  Phone:  http://${IP}:${PORT}   (same wi-fi, plain HTTP)"
 fi
 echo "  Data:   ${DATA_DIR}"

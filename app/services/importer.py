@@ -183,8 +183,11 @@ def stash_pending(filename: str, data: bytes, account_id: int) -> str:
     config.ensure_dirs()
     token = secrets.token_hex(16)
     (config.PENDING_DIR / f"{token}.bin").write_bytes(data)
+    # utf-8 explicitly: statement filenames carry accents, and Windows would
+    # otherwise use the local ANSI codepage and fail on them.
     (config.PENDING_DIR / f"{token}.json").write_text(
-        json.dumps({"filename": filename, "account_id": account_id}))
+        json.dumps({"filename": filename, "account_id": account_id}),
+        encoding="utf-8")
     _cleanup_pending()
     return token
 
@@ -196,7 +199,7 @@ def load_pending(token: str) -> tuple[str, bytes, int] | None:
     meta_path = config.PENDING_DIR / f"{token}.json"
     if not bin_path.exists() or not meta_path.exists():
         return None
-    meta = json.loads(meta_path.read_text())
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
     return meta["filename"], bin_path.read_bytes(), int(meta["account_id"])
 
 
