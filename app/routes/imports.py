@@ -74,7 +74,8 @@ def _render_preview(request, conn, token: str, filename: str, account_id: int,
                   kind=stmt.kind, mapping=stmt.mapping,
                   columns=_column_options(stmt), stats=stats, sample=sample,
                   errors=errors, saved_profile=saved_profile,
-                  suggest_flip=suggest_flip)
+                  suggest_flip=suggest_flip,
+                  is_pdf=filename.lower().endswith(".pdf"))
 
 
 @router.post("/import/upload", dependencies=[Depends(verify_csrf)])
@@ -89,9 +90,10 @@ async def import_upload(request: Request, conn=Depends(get_conn),
                       error="Choose a statement file to upload.")
     data = await file.read()
     if len(data) > config.MAX_UPLOAD_BYTES:
+        limit_mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
         return render(request, conn, "import_upload.html", accounts=_accounts(conn),
                       supported=", ".join(SUPPORTED_EXTENSIONS),
-                      error="File is too large (15 MB max).")
+                      error=f"File is too large ({limit_mb} MB max).")
     acct_id = _resolve_account(conn, account_id, new_account_name, new_account_type)
     try:
         stmt = load_statement(file.filename, data)

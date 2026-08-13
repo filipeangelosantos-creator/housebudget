@@ -9,6 +9,11 @@
 {% if saved_profile %}
 <div class="banner"><div class="grow">Recognized this bank's format from a previous import.</div></div>
 {% endif %}
+{% if is_pdf %}
+<div class="banner"><div class="grow">This table was rebuilt from the PDF's layout —
+check the dates and amounts below before importing. If a column looks wrong, fix it
+under “Column mapping”.</div></div>
+{% endif %}
 {% if suggest_flip %}
 <div class="banner warn"><div class="grow">Most amounts in this credit-card file are positive —
 if charges should count as spending, tick “flip signs” in the column mapping

@@ -18,10 +18,19 @@ you own and can back up with one tap.
 
 ## What it does
 
-- **Statement import** — CSV, Excel (.xlsx) and OFX/QFX exports from any bank.
-  Column layout, date format (day-first vs month-first), decimal commas and
-  debit/credit columns are auto-detected; you confirm a preview before anything
-  is saved, and the app remembers each bank's format afterwards.
+- **Statement import — including the PDF your bank actually sends you**, plus
+  CSV, Excel (.xlsx) and OFX/QFX where a bank offers them. Column layout, date
+  format (day-first vs month-first), decimal commas and debit/credit columns
+  are auto-detected; you confirm a preview before anything is saved, and the
+  app remembers each bank's layout afterwards.
+  A PDF has no table structure, only words with positions, so the table is
+  rebuilt from the layout: amounts are found by a strict two-decimal pattern
+  (an IBAN block or a store number is never read as money), their right edges
+  are clustered into columns so a debit-only row and a credit-only row stay in
+  their own columns, a description wrapped onto a second line is rejoined, page
+  headers and footers are ignored, and a year missing from the rows is taken
+  from the statement header. Scans and photos have no text to read and are
+  rejected with an explanation rather than silently importing nothing.
 - **Safe re-imports** — upload overlapping statements any time; duplicates are
   detected and skipped, and any import can be undone from the history page.
 - **Auto-classification that learns** — a rules engine ships with common
@@ -134,9 +143,11 @@ itself is unchanged.
 
 ## Using it month to month
 
-1. **Once a month (or whenever)**: download statements from each bank/card
-   site (CSV or Excel; OFX is even better) and upload them on the Import tab —
-   both of you can do this from your phones.
+1. **Once a month (or whenever)**: grab the statement from each bank and card —
+   the PDF they email or publish is fine — and upload it on the Import tab.
+   Both of you can do this from your phones. **Check the preview**, especially
+   the first time you import a given bank: the dates and amounts are shown
+   before anything is saved, and any column can be corrected there.
 2. **Review**: the queue has two parts. *Needs a category* is anything the app
    couldn't place — filing one with “remember” checked teaches it the merchant
    for next time, so after a couple of months almost everything classifies
@@ -176,20 +187,23 @@ quick to enter on the Budget tab (set one month, then *copy* it forward).
   actually bought. Amazon charges per shipment, so one order can be several
   charges and one charge several items; the matching is fuzzy and would need
   review. Splitting covers most of this need already.
-- **PDF statements** — banks' PDFs vary wildly; CSV/Excel/OFX exports are more
-  reliable. If one of your banks only offers PDF, open an issue with a sample
-  layout (redacted!) and a parser can be added for that bank.
+- **Scanned PDF statements** — a scan or photo has no text to read, so it needs
+  OCR. Doable with tesseract, but accuracy on figures is the whole problem: a
+  misread digit becomes a wrong amount that nothing downstream can catch.
 - Shared savings goals, yearly view, category drill-downs.
 
 ## Tech notes (for future changes)
 
 - **Stack**: FastAPI + Jinja2 server-rendered pages, SQLite, no JS framework
   (one small progressive-enhancement script), charts are server-generated SVG.
-- **Layout**: `app/parsing/` (statement formats) · `app/services/` (classify,
-  import/dedupe, budgets, splits, transfers, insights, charts) · `app/routes/`
-  + `app/templates/` (pages) · `tests/` (66 tests: parsers, dedupe, rules,
-  budget math, splitting, transfer pairing, analytics, chart rendering, schema
-  migration, and a full end-to-end journey).
+- **Layout**: `app/parsing/` (statement formats, including the PDF layout
+  reconstruction) · `app/services/` (classify, import/dedupe, budgets, splits,
+  transfers, insights, charts) · `app/routes/` + `app/templates/` (pages) ·
+  `tests/` (84 tests: parsers, PDF extraction across four statement layouts,
+  dedupe, rules, budget math, splitting, transfer pairing, analytics, chart
+  rendering, data location, schema migration, and a full end-to-end journey).
+- Test statement PDFs are generated in `tests/pdf_fixtures.py` rather than
+  committed, so no real statement is ever needed in the repo.
 - Charts are server-rendered SVG with no JS library. The categorical palette is
   fixed-order and validated for colour-blind separation and contrast in both
   light and dark mode; series colours are never cycled or reassigned.

@@ -3,9 +3,11 @@ from dataclasses import dataclass
 
 from .csv_parser import Mapping, ParsedRow, apply_mapping, guess_mapping, header_signature, read_csv_rows
 from .ofx_parser import looks_like_ofx, parse_ofx
+from .pdf_parser import looks_like_pdf, read_pdf_rows
 from .xlsx_parser import read_xlsx_rows
 
-SUPPORTED_EXTENSIONS = (".csv", ".txt", ".tsv", ".xlsx", ".ofx", ".qfx", ".qbo")
+SUPPORTED_EXTENSIONS = (".pdf", ".csv", ".txt", ".tsv", ".xlsx",
+                        ".ofx", ".qfx", ".qbo")
 
 
 @dataclass
@@ -30,13 +32,16 @@ def load_statement(filename: str, data: bytes,
         return StatementFile(kind="ofx", rows=[], parsed=parsed,
                              mapping=None, header_sig="ofx")
 
-    if name.endswith(".xlsx"):
+    if name.endswith(".pdf") or looks_like_pdf(data):
+        rows = read_pdf_rows(data)
+    elif name.endswith(".xlsx"):
         rows = read_xlsx_rows(data)
     elif name.endswith((".csv", ".txt", ".tsv")) or not name:
         rows = read_csv_rows(data)
     else:
         raise ValueError(
-            "Unsupported file type. Use CSV, XLSX, OFX or QFX exports from your bank.")
+            "Unsupported file type. Upload a PDF statement, or a CSV, XLSX, "
+            "OFX or QFX export from your bank.")
 
     if not rows:
         raise ValueError("The file appears to be empty.")

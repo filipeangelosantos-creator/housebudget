@@ -11,7 +11,8 @@ import io
 import re
 from dataclasses import dataclass, field, asdict
 
-from .amounts import parse_amount, parse_date, infer_dayfirst
+from .amounts import (dayfirst_by_month_spread, infer_dayfirst, parse_amount,
+                      parse_date)
 
 DELIMITERS = [",", ";", "\t", "|"]
 
@@ -189,9 +190,13 @@ def guess_mapping(rows: list[list]) -> Mapping:
         fallback = [i for i in range(width) if i not in used]
         m.desc_cols = fallback[:1]
 
-    # --- day-first dates?
+    # --- day-first dates? A day above 12 settles it outright; otherwise fall
+    # back to whichever reading keeps the statement inside a sensible period.
     raw_dates = [r[m.date_col] if m.date_col < len(r) else None for r in sample]
-    inferred = infer_dayfirst([c for c in raw_dates if isinstance(c, str)])
+    text_dates = [c for c in raw_dates if isinstance(c, str)]
+    inferred = infer_dayfirst(text_dates)
+    if inferred is None:
+        inferred = dayfirst_by_month_spread(text_dates)
     if inferred is not None:
         m.dayfirst = inferred
     return m

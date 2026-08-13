@@ -29,7 +29,7 @@ DB_PATH = Path(os.environ.get("HB_DB_PATH", DATA_DIR / "budget.db"))
 SESSION_COOKIE = "hb_session"
 SESSION_MAX_AGE = int(os.environ.get("HB_SESSION_DAYS", "30")) * 24 * 3600
 
-MAX_UPLOAD_BYTES = 15 * 1024 * 1024  # 15 MB per statement file
+MAX_UPLOAD_BYTES = 25 * 1024 * 1024  # 25 MB per statement file (PDFs are bigger)
 
 LOGIN_MAX_FAILURES = 10
 LOGIN_LOCKOUT_SECONDS = 300

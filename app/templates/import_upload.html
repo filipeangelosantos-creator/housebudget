@@ -3,8 +3,8 @@
 {% block content %}
 
 <h1>Import a statement</h1>
-<p class="small muted">Download a CSV, Excel or OFX/QFX export from your bank or credit-card
-website, then upload it here. Nothing leaves your server.</p>
+<p class="small muted">Upload the statement PDF your bank sends you, or a CSV, Excel
+or OFX export if your bank offers one. Nothing leaves your server.</p>
 
 {% if error %}<div class="error-box">{{ error }}</div>{% endif %}
 
@@ -40,7 +40,7 @@ website, then upload it here. Nothing leaves your server.</p>
     </div>
 
     <label class="f">Statement file</label>
-    <input type="file" name="file" accept=".csv,.txt,.tsv,.xlsx,.ofx,.qfx,.qbo" data-show-name required>
+    <input type="file" name="file" accept=".pdf,.csv,.txt,.tsv,.xlsx,.ofx,.qfx,.qbo" data-show-name required>
     <p class="small muted" id="file-name-out">Supported: {{ supported }}</p>
 
     <div class="actions"><button class="btn" type="submit">Preview import</button></div>
@@ -53,9 +53,12 @@ website, then upload it here. Nothing leaves your server.</p>
   <h2>Tips</h2>
   <ul class="small" style="margin:6px 0; padding-left:18px; line-height:1.8">
     <li>You'll see a preview before anything is saved — nothing is imported yet.</li>
+    <li><strong>Always check the preview on a PDF.</strong> The table is rebuilt from
+      the page layout, so glance at the dates and amounts before importing.</li>
     <li>Re-uploading overlapping statements is safe: duplicates are skipped automatically.</li>
-    <li>The app remembers each bank's file format after the first confirmed import.</li>
-    <li>PDF statements aren't supported — pick CSV or Excel in your bank's download options.</li>
+    <li>The app remembers each bank's layout after the first confirmed import.</li>
+    <li>A scanned or photographed statement has no text to read — for those, ask your
+      bank for a CSV or Excel export.</li>
   </ul>
 </div>
 
