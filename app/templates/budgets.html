@@ -15,16 +15,41 @@ planned spending {{ currency }}{{ summary.expense_budget|money }} =
 {{ plain(summary.income_budget - summary.expense_budget) }}</strong>
 · <a href="/categories">Edit categories</a></p>
 
-{% if not has_budget and prior_month %}
-<form method="post" action="/budgets/copy">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <input type="hidden" name="month" value="{{ month }}">
-  <input type="hidden" name="from_month" value="{{ prior_month }}">
-  <div class="banner">
-    <div class="grow">No budget for this month yet.</div>
-    <button class="btn small" type="submit">Copy from {{ prior_month }}</button>
+{% if summary.budget_from %}
+<div class="banner">
+  <div class="grow">Carried forward from <strong>{{ prior_label }}</strong> — these
+  amounts already apply. Change anything and save to make them this month's own.</div>
+</div>
+{% endif %}
+
+{% if income.detail %}
+<div class="card">
+  <h2>Income timing</h2>
+  {% for entry in income.detail %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ entry.stream.name }}</div>
+      <div class="meta">{{ entry.stream.cadence_label }} ·
+        {{ entry.paydays|length }} payday{{ 's' if entry.paydays|length != 1 }} in
+        {{ month_label }} ({% for d in entry.paydays %}{{ d.strftime('%-d %b') }}{{ ', ' if not loop.last }}{% endfor %})</div>
+    </div>
+    <div class="amt">{{ currency }}{{ entry.expected|money }}</div>
   </div>
-</form>
+  {% endfor %}
+  <div class="spread" style="margin-top:8px">
+    <span class="small">Expected this month</span>
+    <strong>{{ currency }}{{ income.total|money }}</strong>
+  </div>
+  <p class="small muted">Pay that lands every two weeks falls three times in some
+  months and twice in others, so this varies by month on purpose. Received so far:
+  {{ currency }}{{ income.received|money }}.</p>
+  <form method="post" action="/budgets/use-expected">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button class="btn ghost block" type="submit">Set income budget to
+      {{ currency }}{{ income.total|money }}</button>
+  </form>
+</div>
 {% endif %}
 
 <form method="post" action="/budgets/save">

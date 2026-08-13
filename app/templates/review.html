@@ -42,17 +42,21 @@ shop like Costco or Amazon usually covers more than one category.</p></div>
   <form method="post" action="/transactions/{{ t.id }}/confirm">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="back" value="/review">
-    <input type="hidden" name="pattern" value="{{ t.pattern }}">
     <div class="form-row">
       {{ category_select('category_id', categories, selected=t.category_id,
                          include_blank=False) }}
       <button class="btn" type="submit" style="flex:0 0 auto">Confirm</button>
     </div>
-    <div class="spread" style="margin-top:8px">
-      <label class="check" style="margin:0"><input type="checkbox" name="remember" value="1">
-        <span class="small">Always file “{{ t.pattern }}” here</span></label>
-      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review">Split…</a>
+    <label class="check" style="margin:8px 0 4px">
+      <input type="checkbox" name="remember" value="1">
+      <span class="small">Always file transactions matching:</span></label>
+    <div class="form-row">
+      <input type="text" name="pattern" value="{{ t.pattern }}" class="pattern-input"
+             data-match-hint="hint-c{{ t.id }}" aria-label="Merchant text to remember">
+      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review"
+         style="flex:0 0 auto">Split…</a>
     </div>
+    <p class="small muted match-hint" id="hint-c{{ t.id }}"></p>
   </form>
 </div>
 {% endfor %}
@@ -82,7 +86,6 @@ shop like Costco or Amazon usually covers more than one category.</p></div>
     <p class="small" style="margin:8px 0 0">You've used
       <strong>{{ guesses[t.id].name }}</strong> for this merchant {{ guesses[t.id].count }}× before.</p>
     {% endif %}
-    <input type="hidden" name="pattern_{{ t.id }}" value="{{ suggestions[t.id] }}">
     <div class="form-row" style="margin-top:8px">
       {{ category_select('cat_' ~ t.id, categories,
                          selected=(guesses[t.id].category_id if guesses.get(t.id) else None),
@@ -90,12 +93,18 @@ shop like Costco or Amazon usually covers more than one category.</p></div>
       <button class="btn" type="submit" name="only" value="{{ t.id }}"
               style="flex:0 0 auto">Save</button>
     </div>
-    <div class="spread" style="margin-top:8px">
-      <label class="check" style="margin:0">
-        <input type="checkbox" name="remember_{{ t.id }}" value="1" checked>
-        <span class="small">Always file “<strong>{{ suggestions[t.id] }}</strong>” here</span></label>
-      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review">Split…</a>
+    <label class="check" style="margin:8px 0 4px">
+      <input type="checkbox" name="remember_{{ t.id }}" value="1" checked>
+      <span class="small">Always file transactions matching:</span></label>
+    <div class="form-row">
+      <input type="text" name="pattern_{{ t.id }}" value="{{ suggestions[t.id] }}"
+             class="pattern-input" data-match-hint="hint-{{ t.id }}"
+             aria-label="Merchant text to remember">
+      <a class="btn small ghost" href="/transactions/{{ t.id }}/split?back=/review"
+         style="flex:0 0 auto">Split…</a>
     </div>
+    <p class="small muted match-hint" id="hint-{{ t.id }}">Edit if it's cut too
+      short — or too broad.</p>
   </div>
   {% endfor %}
 

@@ -46,7 +46,9 @@
 
     <label class="check"><input type="checkbox" name="remember" value="1">
       <span class="small">Always use this category when the description contains:</span></label>
-    <input type="text" name="pattern" value="{{ suggested_pattern }}">
+    <input type="text" name="pattern" value="{{ suggested_pattern }}"
+           class="pattern-input" data-match-hint="hint-edit">
+    <p class="small muted match-hint" id="hint-edit"></p>
     {% if similar_uncat > 0 %}
     <p class="small muted">{{ similar_uncat }} other uncategorized transaction{{ 's' if similar_uncat != 1 }} from this merchant will be filed too.</p>
     {% endif %}
@@ -61,6 +63,45 @@
       {% endif %}
     </div>
   </form>
+  {% if partner %}
+  <div class="split-view">
+    <div class="spread"><strong class="small">Matched as a transfer</strong>
+      {% if partner.source == 'auto' %}<span class="chip">auto</span>{% endif %}</div>
+    <div class="small" style="margin-top:4px">
+      {{ partner.account_name }} · {{ partner.date }}<br>
+      <a href="/transactions/{{ partner.id }}?back={{ ('/transactions/' ~ txn.id)|urlencode }}">{{ partner.description }}</a>
+    </div>
+    <form method="post" action="/transactions/{{ txn.id }}/link" style="margin-top:8px">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="back" value="{{ back }}">
+      <input type="hidden" name="unlink" value="1">
+      <button class="btn small ghost" type="submit">Not a transfer — unlink</button>
+    </form>
+  </div>
+  <p class="small muted">Both sides are kept out of budgets and insights.</p>
+  {% elif transfer_options %}
+  <details class="adv">
+    <summary>This is a transfer between my accounts…</summary>
+    <p class="small muted">Pick the other side. Amounts don't have to match — a
+    fee or exchange difference can make them differ.</p>
+    <form method="post" action="/transactions/{{ txn.id }}/link">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="back" value="{{ back }}">
+      <div class="form-row">
+        <select name="other_id">
+          {% for o in transfer_options %}
+          <option value="{{ o.id }}">
+            {{ currency }}{{ o.amount_cents|money }} · {{ o.account_name }} ·
+            {{ o.date }}{% if not o.exact_amount %} (different amount){% endif %}
+            — {{ o.description|truncate(38) }}</option>
+          {% endfor %}
+        </select>
+        <button class="btn" type="submit" style="flex:0 0 auto">Link</button>
+      </div>
+    </form>
+  </details>
+  {% endif %}
+
   <form method="post" action="/transactions/{{ txn.id }}" data-confirm="Delete this transaction?" style="margin-top:10px">
     <input type="hidden" name="csrf" value="{{ csrf }}">
     <input type="hidden" name="back" value="{{ back }}">

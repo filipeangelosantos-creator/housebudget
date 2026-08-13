@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount with context %}
+{% block title %}Pair a transfer{% endblock %}
+{% block content %}
+
+<div class="spread">
+  <h1>Pair a transfer</h1>
+  <a class="btn small ghost" href="/transfers">Back</a>
+</div>
+
+{% if request.query_params.get('m') %}
+<div class="msg-box">{{ request.query_params.get('m') }}</div>
+{% endif %}
+
+{% if chosen %}
+<p class="small muted">Step 2 of 2 — pick the other side. Amounts don't have to
+match: a fee or an exchange difference makes the two sides differ, and only you
+can say they belong together.</p>
+
+<div class="card" style="border-left:4px solid var(--accent)">
+  <div class="spread">
+    <div>
+      <strong>{{ chosen.description }}</strong>
+      <div class="small muted">{{ chosen.account_name }} · {{ chosen.date }}</div>
+    </div>
+    <div class="amt {{ 'pos' if chosen.amount_cents > 0 }}">{{ amount(chosen.amount_cents) }}</div>
+  </div>
+  <p class="small muted" style="margin:8px 0 0">
+    <a href="/transfers/manual">Pick a different one</a></p>
+</div>
+
+{% if options %}
+<div class="card">
+  <h2>Possible other side</h2>
+  {% for o in options %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ o.description }}</div>
+      <div class="meta">{{ o.account_name }} · {{ o.date }} ·
+        {% if o.days_apart == 0 %}same day{% else %}{{ o.days_apart }} day{{ 's' if o.days_apart != 1 }} apart{% endif %}
+        {% if o.exact_amount %}<span class="chip">same amount</span>{% endif %}
+      </div>
+    </div>
+    <div class="amt {{ 'pos' if o.amount_cents > 0 }}">{{ amount(o.amount_cents) }}</div>
+    <form method="post" action="/transfers/pair" style="flex-shrink:0">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="txn_a" value="{{ chosen.id }}">
+      <input type="hidden" name="txn_b" value="{{ o.id }}">
+      <button class="btn small" type="submit">Link</button>
+    </form>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="card"><p class="muted">Nothing in another account moved the opposite
+way within three weeks of this one. The other side may not be imported yet.</p></div>
+{% endif %}
+
+{% else %}
+<p class="small muted">Step 1 of 2 — pick either side of the movement. Only
+transactions that aren't already paired are listed.</p>
+
+<form method="get" action="/transfers/manual">
+  <div class="filters">
+    <select name="account" data-autosubmit>
+      <option value="">All accounts</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if account == a.id }}>{{ a.name }}</option>
+      {% endfor %}
+    </select>
+    <input type="text" name="q" value="{{ q }}" placeholder="Search description…"
+           enterkeyhint="search">
+  </div>
+  <noscript><button class="btn small ghost" type="submit">Search</button></noscript>
+</form>
+
+<div class="card">
+  {% for t in pool %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc"><a href="/transfers/manual?side={{ t.id }}">{{ t.description }}</a></div>
+      <div class="meta">{{ t.account_name }} · {{ t.date }}</div>
+    </div>
+    <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+  </div>
+  {% else %}
+  <p class="muted">Everything is already paired, or nothing matches that search.</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}

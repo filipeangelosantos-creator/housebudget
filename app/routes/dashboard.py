@@ -43,4 +43,5 @@ def dashboard(request: Request, conn=Depends(get_conn),
         total_uncat=total_uncat,
         to_confirm=splits_svc.pending_confirmation_count(conn),
         transfer_suggestions=transfers.suggestion_count(conn),
-        future_dated=review.future_dated(conn))
+        future_dated=review.future_dated(conn),
+        income=insights.expected_income(conn, m))

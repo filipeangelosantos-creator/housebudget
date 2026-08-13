@@ -24,6 +24,20 @@ def rules_page(request: Request, conn=Depends(get_conn), user=Depends(current_us
                   uncat=uncat)
 
 
+@router.get("/rules/match-count")
+def rules_match_count(request: Request, conn=Depends(get_conn),
+                      user=Depends(current_user), pattern: str = "",
+                      match_type: str = "contains"):
+    """How many transactions a pattern would catch, for the live hint shown
+    while you edit it. A pattern that is too short catches everything."""
+    pattern = pattern.strip()
+    if not pattern or match_type not in ("contains", "exact", "regex"):
+        return {"count": 0, "total": 0}
+    total = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    return {"count": classify.count_rule_matches(conn, pattern, match_type),
+            "total": total}
+
+
 @router.post("/rules/add", dependencies=[Depends(verify_csrf)])
 def rule_add(request: Request, conn=Depends(get_conn), user=Depends(current_user),
              pattern: str = Form(...), category_id: int = Form(...),

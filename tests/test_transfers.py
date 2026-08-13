@@ -166,3 +166,92 @@ def test_tiny_amounts_are_not_suggested(conn):
     add_txn(conn, 1, "2026-08-10", -500, "COFFEE")
     add_txn(conn, 2, "2026-08-10", 500, "SMALL REFUND")
     assert transfers.find_candidates(conn) == []
+
+
+# --- manual pairing ----------------------------------------------------------
+
+def test_manual_candidates_offers_mismatched_amounts(conn):
+    """The whole reason manual pairing exists: a wire fee makes the two sides
+    differ, so the automatic matcher refuses to guess and offers nothing."""
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -100000, "WIRE OUT")
+    add_txn(conn, 2, "2026-08-09", 99500, "WIRE IN LESS FEE")
+    assert transfers.find_candidates(conn) == []          # amounts differ
+
+    options = transfers.manual_candidates(conn, out)
+    assert len(options) == 1
+    assert options[0]["amount_cents"] == 99500
+    assert options[0]["exact_amount"] is False
+    assert options[0]["days_apart"] == 4
+
+
+def test_manual_candidates_exclude_same_account_and_same_direction(conn):
+    two_accounts(conn)
+    account(conn, 3, "Savings", "savings")
+    out = add_txn(conn, 1, "2026-08-05", -50000, "MOVE OUT")
+    add_txn(conn, 1, "2026-08-05", 50000, "SAME ACCOUNT IN")     # same account
+    add_txn(conn, 2, "2026-08-05", -50000, "ALSO GOING OUT")     # same direction
+    add_txn(conn, 2, "2026-06-01", 50000, "TOO LONG AGO")        # outside window
+    good = add_txn(conn, 3, "2026-08-06", 50000, "ARRIVED")
+
+    assert [o["id"] for o in transfers.manual_candidates(conn, out)] == [good]
+
+
+def test_manual_candidates_rank_exact_amounts_first(conn):
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -50000, "MOVE OUT")
+    add_txn(conn, 2, "2026-08-05", 49000, "CLOSE BUT NOT EQUAL")
+    exact = add_txn(conn, 2, "2026-08-12", 50000, "EXACT BUT LATER")
+    assert transfers.manual_candidates(conn, out)[0]["id"] == exact
+
+
+def test_link_pair_accepts_either_order_and_hides_the_money(conn):
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -100000, "WIRE OUT", category="Transfers")
+    inn = add_txn(conn, 2, "2026-08-09", 99500, "WIRE IN", category="Salary")
+
+    assert transfers.link_pair(conn, inn, out) is True       # given in-side first
+    pair = transfers.linked_pairs(conn)[0]
+    assert (pair["out_id"], pair["in_id"]) == (out, inn)     # stored the right way
+    s = budgets.month_summary(conn, "2026-08")
+    assert s.income_actual == 0 and s.expense_actual == 0
+
+
+def test_link_pair_refuses_two_sides_going_the_same_way(conn):
+    two_accounts(conn)
+    a = add_txn(conn, 1, "2026-08-05", -50000, "OUT ONE")
+    b = add_txn(conn, 2, "2026-08-05", -50000, "OUT TWO")
+    assert transfers.link_pair(conn, a, b) is False
+    assert transfers.link_pair(conn, a, a) is False
+    assert transfers.linked_count(conn) == 0
+
+
+def test_linked_partner_reports_the_other_side(conn):
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -85000, "TRANSFER TO VISA")
+    inn = add_txn(conn, 2, "2026-08-06", 85000, "PAYMENT THANK YOU")
+    assert transfers.linked_partner(conn, out) is None
+    transfers.auto_link(conn)
+
+    from_out = transfers.linked_partner(conn, out)
+    from_in = transfers.linked_partner(conn, inn)
+    assert from_out["id"] == inn and from_out["account_name"] == "Visa"
+    assert from_in["id"] == out and from_in["account_name"] == "Checking"
+    assert from_out["link_id"] == from_in["link_id"]
+    # and a manual candidate list never offers an already-paired row
+    assert transfers.manual_candidates(conn, out) == []
+
+
+def test_unpaired_pool_skips_linked_rows(conn):
+    two_accounts(conn)
+    out = add_txn(conn, 1, "2026-08-05", -85000, "TRANSFER TO VISA")
+    add_txn(conn, 2, "2026-08-06", 85000, "PAYMENT THANK YOU")
+    loose = add_txn(conn, 1, "2026-08-07", -2500, "COFFEE SHOP")
+    assert len(transfers.unpaired(conn)) == 3
+    transfers.auto_link(conn)
+
+    remaining = transfers.unpaired(conn)
+    assert [r["id"] for r in remaining] == [loose]
+    assert [r["id"] for r in transfers.unpaired(conn, q="coffee")] == [loose]
+    assert transfers.unpaired(conn, account=2) == []
+    assert out not in [r["id"] for r in remaining]

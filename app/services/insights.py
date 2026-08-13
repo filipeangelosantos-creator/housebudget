@@ -9,7 +9,7 @@ rather than silently inflating income and spending.
 """
 import calendar
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from .budgets import shift_month
 
@@ -192,6 +192,132 @@ def category_composition(conn, month: str, n: int = 12, top: int = 6) -> dict:
             series.append({"name": "Other", "total": sum(totals[n] for n in rest),
                            "monthly": other})
     return {"months": seq, "series": series}
+
+
+@dataclass
+class PayStream:
+    """A recurring income source and how often it lands."""
+    name: str
+    category: str
+    cadence: str                 # weekly | biweekly | semimonthly | monthly
+    typical_cents: int
+    last_date: date
+    days_of_month: list[int]
+
+    @property
+    def cadence_label(self) -> str:
+        return {"weekly": "every week", "biweekly": "every 2 weeks",
+                "semimonthly": "twice a month",
+                "monthly": "monthly"}.get(self.cadence, self.cadence)
+
+    def paydays_in(self, month: str) -> list[date]:
+        """Which days of `month` this stream is expected to pay on."""
+        year, mon = int(month[:4]), int(month[5:7])
+        last_day = calendar.monthrange(year, mon)[1]
+        first, last = date(year, mon, 1), date(year, mon, last_day)
+
+        if self.cadence in ("semimonthly", "monthly"):
+            return [date(year, mon, min(d, last_day))
+                    for d in sorted(set(self.days_of_month))]
+
+        step = timedelta(days=7 if self.cadence == "weekly" else 14)
+        # Walk right past the start of the month, then step back in — stopping
+        # as soon as the cursor is inside would miss the earlier paydays.
+        cursor = self.last_date
+        while cursor >= first:
+            cursor -= step
+        while cursor < first:
+            cursor += step
+        out = []
+        while cursor <= last:
+            out.append(cursor)
+            cursor += step
+        return out
+
+
+def _classify_cadence(dates: list[date]) -> tuple[str, list[int]] | None:
+    if len(dates) < 3:
+        return None
+    gaps = sorted((dates[i + 1] - dates[i]).days for i in range(len(dates) - 1))
+    median = gaps[len(gaps) // 2]
+    days = [d.day for d in dates]
+    if 5 <= median <= 9:
+        return "weekly", days
+    if 12 <= median <= 18:
+        # Twice-monthly pay lands on the same two dates each month; fortnightly
+        # pay drifts through the month. Both average about a fortnight.
+        distinct = sorted(set(days))
+        clustered = len(distinct) <= 2 or (
+            len(distinct) <= 4 and max(distinct) - min(distinct) > 20
+            and all(min(abs(d - a) for a in (distinct[0], distinct[-1])) <= 2
+                    for d in days))
+        if clustered:
+            return "semimonthly", sorted({distinct[0], distinct[-1]})
+        return "biweekly", days
+    if 25 <= median <= 35:
+        return "monthly", [max(set(days), key=days.count)]
+    return None
+
+
+def pay_streams(conn, month: str, lookback: int = 6) -> list[PayStream]:
+    """Recurring income, with how often each one pays.
+
+    Salary paid fortnightly lands three times in some months and twice in
+    others, so a flat monthly income figure is always wrong for one of them.
+    """
+    seq = months_back(month, lookback)
+    rows = conn.execute(
+        """SELECT a.merchant_key, a.date, a.amount_cents, c.name AS category
+           FROM txn_allocations a
+           JOIN categories c ON c.id = a.category_id
+           JOIN category_groups g ON g.id = c.group_id
+           WHERE g.kind = 'income' AND c.excluded = 0 AND a.is_transfer = 0
+             AND a.amount_cents > 0
+             AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+           ORDER BY a.date""", (seq[0], month)).fetchall()
+
+    grouped: dict[str, list] = {}
+    for r in rows:
+        grouped.setdefault(r["merchant_key"], []).append(r)
+
+    streams: list[PayStream] = []
+    for merchant, entries in grouped.items():
+        dates = [date.fromisoformat(e["date"]) for e in entries]
+        cadence = _classify_cadence(sorted(set(dates)))
+        if cadence is None:
+            continue
+        amounts = sorted(e["amount_cents"] for e in entries)
+        streams.append(PayStream(
+            name=merchant.title(), category=entries[-1]["category"],
+            cadence=cadence[0], typical_cents=amounts[len(amounts) // 2],
+            last_date=max(dates), days_of_month=cadence[1]))
+    streams.sort(key=lambda s: -s.typical_cents)
+    return streams
+
+
+def expected_income(conn, month: str, today: date | None = None) -> dict:
+    """What recurring income should total this month, given when it lands."""
+    streams = pay_streams(conn, month)
+    detail = []
+    total = 0
+    for stream in streams:
+        days = stream.paydays_in(month)
+        if not days:
+            continue
+        amount = stream.typical_cents * len(days)
+        total += amount
+        detail.append({"stream": stream, "paydays": days, "expected": amount})
+    received = conn.execute(
+        """SELECT COALESCE(SUM(a.amount_cents), 0) AS total FROM txn_allocations a
+           JOIN categories c ON c.id = a.category_id
+           JOIN category_groups g ON g.id = c.group_id
+           WHERE g.kind = 'income' AND c.excluded = 0 AND a.is_transfer = 0
+             AND a.amount_cents > 0 AND substr(a.date,1,7) = ?""",
+        (month,)).fetchone()["total"]
+    today = today or date.today()
+    upcoming = [d for entry in detail for d in entry["paydays"] if d > today]
+    return {"total": total, "detail": detail, "received": received,
+            "upcoming": sorted(upcoming)}
 
 
 @dataclass

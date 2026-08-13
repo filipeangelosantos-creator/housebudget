@@ -51,6 +51,79 @@
     updateCount();
   }
 
+  // Transaction list: tick rows to recategorize them together.
+  var bulkForm = document.getElementById("bulk-form");
+  if (bulkForm) {
+    var bar = document.getElementById("bulk-bar");
+    var countOut = document.getElementById("bulk-count");
+    var allHint = document.getElementById("bulk-all-hint");
+    var selectAll = document.getElementById("select-all");
+    var refresh = function () {
+      var checked = bulkForm.querySelectorAll(".txn-check:checked").length;
+      if (countOut) countOut.textContent = String(checked);
+      if (bar) bar.hidden = checked === 0;
+      if (allHint) allHint.hidden = checked === 0;
+      if (selectAll) {
+        var boxes = bulkForm.querySelectorAll(".txn-check").length;
+        selectAll.checked = checked > 0 && checked === boxes;
+        selectAll.indeterminate = checked > 0 && checked < boxes;
+      }
+    };
+    bulkForm.addEventListener("change", function (e) {
+      if (e.target === selectAll) {
+        bulkForm.querySelectorAll(".txn-check").forEach(function (box) {
+          box.checked = selectAll.checked;
+        });
+      }
+      if (e.target.classList.contains("txn-check") || e.target === selectAll) refresh();
+    });
+    bulkForm.addEventListener("submit", function (e) {
+      var trigger = e.submitter;
+      if (trigger && trigger.getAttribute("data-confirm-bulk")) {
+        if (!window.confirm(trigger.getAttribute("data-confirm-bulk"))) e.preventDefault();
+      }
+    });
+    refresh();
+  }
+
+  // Rule patterns: say how many transactions the text you typed would catch,
+  // so "too short" and "too broad" are visible before you commit to it.
+  var patternInputs = document.querySelectorAll(".pattern-input[data-match-hint]");
+  if (patternInputs.length) {
+    var describe = function (input) {
+      var hint = document.getElementById(input.getAttribute("data-match-hint"));
+      if (!hint) return;
+      var value = input.value.trim();
+      if (!value) {
+        hint.textContent = "Enter some text from the merchant name.";
+        return;
+      }
+      fetch("/rules/match-count?pattern=" + encodeURIComponent(value))
+        .then(function (r) { return r.json(); })
+        .then(function (data) {
+          if (input.value.trim() !== value) return;   // typed on since
+          var n = data.count, total = data.total;
+          if (n === 0) {
+            hint.textContent = "Matches nothing yet — it will apply to future imports.";
+          } else if (total && n > total * 0.3) {
+            hint.textContent = "Matches " + n + " of " + total +
+              " transactions — probably too broad.";
+          } else {
+            hint.textContent = "Matches " + n + " transaction" + (n === 1 ? "" : "s") + ".";
+          }
+        })
+        .catch(function () { /* hint is optional */ });
+    };
+    var timers = new WeakMap();
+    patternInputs.forEach(function (input) {
+      describe(input);
+      input.addEventListener("input", function () {
+        clearTimeout(timers.get(input));
+        timers.set(input, setTimeout(function () { describe(input); }, 350));
+      });
+    });
+  }
+
   // On the import form: show what was chosen.
   var file = document.querySelector('input[type="file"][data-show-name]');
   if (file) {

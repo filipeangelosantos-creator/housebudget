@@ -50,6 +50,22 @@ def latest_budget_month_before(conn, month: str) -> str | None:
     return row["m"] if row and row["m"] else None
 
 
+def effective_budgets(conn, month: str) -> tuple[dict[int, int], str | None]:
+    """This month's budget, falling back to the last month you set one.
+
+    A budget is usually the same every month, so an unset month carries the
+    previous one forward rather than reading as "no budget". Saving anything
+    for the month makes it that month's own, and it stops inheriting.
+    """
+    explicit = get_budgets(conn, month)
+    if explicit:
+        return explicit, None
+    source = latest_budget_month_before(conn, month)
+    if source:
+        return get_budgets(conn, source), source
+    return {}, None
+
+
 def actuals_by_category(conn, month: str) -> dict[int | None, int]:
     """Signed sums per category for the month (uncategorized under None).
 
@@ -114,6 +130,7 @@ class MonthSummary:
     expense_budget: int = 0
     uncategorized_amount: int = 0
     uncategorized_count: int = 0
+    budget_from: str | None = None      # set when this month inherits a budget
 
     @property
     def net(self) -> int:
@@ -129,7 +146,7 @@ class MonthSummary:
 def month_summary(conn, month: str, include_empty: bool = False) -> MonthSummary:
     """Budget vs actual for one month, grouped. Expense actuals are shown as
     positive 'spent' magnitudes; refunds within a category net out."""
-    budgets = get_budgets(conn, month)
+    budgets, budget_from = effective_budgets(conn, month)
     actuals = actuals_by_category(conn, month)
 
     groups: list[GroupBlock] = []
@@ -152,7 +169,7 @@ def month_summary(conn, month: str, include_empty: bool = False) -> MonthSummary
         if block.lines or include_empty:
             groups.append(block)
 
-    summary = MonthSummary(month=month, groups=groups)
+    summary = MonthSummary(month=month, groups=groups, budget_from=budget_from)
     for block in groups:
         if block.kind == "income":
             summary.income_actual += block.actual

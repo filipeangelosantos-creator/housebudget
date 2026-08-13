@@ -7,9 +7,9 @@
 {%- if cents < 0 -%}−{{ currency }}{{ cents|money }}{%- else -%}{{ currency }}{{ cents|money }}{%- endif -%}
 {%- endmacro %}
 
-{% macro category_select(name, categories, selected=None, autosubmit=False, include_blank=True, merchant=None) -%}
+{% macro category_select(name, categories, selected=None, autosubmit=False, include_blank=True, merchant=None, blank_label='— uncategorized —') -%}
 <select name="{{ name }}"{% if autosubmit %} data-autosubmit{% endif %}{% if merchant %} data-merchant="{{ merchant }}"{% endif %}>
-  {% if include_blank %}<option value="">— uncategorized —</option>{% endif %}
+  {% if include_blank %}<option value="">{{ blank_label }}</option>{% endif %}
   {%- for c in categories %}
   {%- if loop.first or c.group_name != loop.previtem.group_name %}
   {%- if not loop.first %}</optgroup>{% endif %}

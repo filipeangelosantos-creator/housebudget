@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 
 from ..db import utcnow
 from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
-from ..services import classify, review, splits as splits_svc
+from ..services import classify, review, splits as splits_svc, transfers
 from .dashboard import clean_month
 
 router = APIRouter()
@@ -34,6 +34,29 @@ def _txn_or_404(conn, txn_id: int):
     return row
 
 
+def _list_filters(month: str | None, account: str, category: str, q: str):
+    """The WHERE clause behind the transaction list, shared with bulk edits so
+    "apply to everything matching" really means what the list is showing."""
+    where: list[str] = []
+    params: list = []
+    if month:
+        where.append("substr(t.date,1,7) = ?")
+        params.append(month)
+    if str(account).isdigit():
+        where.append("t.account_id = ?")
+        params.append(int(account))
+    if category == "uncat":
+        where.append("t.category_id IS NULL")
+    elif category and category.isdigit():
+        where.append("t.category_id = ?")
+        params.append(int(category))
+    if q and q.strip():
+        where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
+        like = f"%{q.strip()}%"
+        params.extend([like, like.upper()])
+    return where, params
+
+
 @router.get("/transactions")
 def transactions_list(request: Request, conn=Depends(get_conn),
                       user=Depends(current_user), month: str | None = None,
@@ -41,27 +64,12 @@ def transactions_list(request: Request, conn=Depends(get_conn),
                       q: str = "", page: str = "1"):
     # The filter form submits account= and page= as empty strings for "all" /
     # unset; typing these as int made FastAPI reject the request outright.
-    account = int(account) if account.isdigit() else None
     page = max(1, int(page)) if page.isdigit() else 1
-    where, params = [], []
     # No param -> current month; explicit "all" or a cleared month input -> all months
     show_all_months = month is not None and month.strip() in ("all", "")
     m = None if show_all_months else clean_month(month)
-    if m:
-        where.append("substr(t.date,1,7) = ?")
-        params.append(m)
-    if account:
-        where.append("t.account_id = ?")
-        params.append(account)
-    if category == "uncat":
-        where.append("t.category_id IS NULL")
-    elif category and category.isdigit():
-        where.append("t.category_id = ?")
-        params.append(int(category))
-    if q.strip():
-        where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
-        like = f"%{q.strip()}%"
-        params.extend([like, like.upper()])
+    where, params = _list_filters(m, account, category or "", q)
+    account = int(account) if account.isdigit() else None
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     total = conn.execute(
@@ -93,6 +101,49 @@ def transactions_list(request: Request, conn=Depends(get_conn),
                   next_month=shift_month(m_for_nav, 1),
                   account=account, category=category or "", q=q,
                   accounts=accounts, categories=_categories_grouped(conn))
+
+
+@router.post("/transactions/bulk", dependencies=[Depends(verify_csrf)])
+async def transactions_bulk(request: Request, conn=Depends(get_conn),
+                            user=Depends(current_user)):
+    """Set one category on many transactions at once.
+
+    Either the ticked rows, or every transaction matching the filters currently
+    applied to the list — which is how you fix a whole month of one merchant.
+    """
+    form = await request.form()
+    back = _safe_back(str(form.get("back", "/transactions")))
+    category_id = str(form.get("bulk_category", ""))
+    if not category_id.isdigit():
+        return RedirectResponse(back, status_code=303)
+    category = int(category_id)
+
+    if str(form.get("scope", "selected")) == "filtered":
+        where, params = _list_filters(
+            month=str(form.get("f_month", "")) or None,
+            account=str(form.get("f_account", "")),
+            category=str(form.get("f_category", "")),
+            q=str(form.get("f_q", "")))
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        ids = [r["id"] for r in conn.execute(
+            f"SELECT t.id FROM transactions t {where_sql}", params).fetchall()]
+    else:
+        ids = [int(v) for v in form.getlist("txn") if str(v).isdigit()]
+    if not ids:
+        return RedirectResponse(back, status_code=303)
+
+    for chunk_start in range(0, len(ids), 400):
+        chunk = ids[chunk_start:chunk_start + 400]
+        marks = ",".join("?" * len(chunk))
+        # A split transaction's parts are its allocation; replacing the whole
+        # thing with one category would silently discard them.
+        conn.execute(f"DELETE FROM transaction_splits WHERE transaction_id IN ({marks})",
+                     chunk)
+        conn.execute(
+            f"UPDATE transactions SET category_id = ?, needs_review = 0 "
+            f"WHERE id IN ({marks})", [category] + chunk)
+    conn.commit()
+    return RedirectResponse(back, status_code=303)
 
 
 @router.get("/transactions/new")
@@ -138,6 +189,7 @@ def txn_edit_page(txn_id: int, request: Request, conn=Depends(get_conn),
     similar_uncat = conn.execute(
         "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL AND "
         "merchant_key = ? AND id != ?", (txn["merchant_key"], txn_id)).fetchone()[0]
+    partner = transfers.linked_partner(conn, txn_id)
     return render(request, conn, "txn_edit.html", txn=txn,
                   categories=_categories_grouped(conn),
                   suggested_pattern=classify.suggest_pattern(txn["description"]),
@@ -146,7 +198,28 @@ def txn_edit_page(txn_id: int, request: Request, conn=Depends(get_conn),
                   history=splits_svc.merchant_history(conn, txn["merchant_key"], txn_id),
                   mixed_basket=splits_svc.is_mixed_basket_merchant(
                       txn["normalized_desc"], txn["merchant_key"]),
+                  partner=partner,
+                  transfer_options=([] if partner else
+                                    transfers.manual_candidates(conn, txn_id)),
                   back=_safe_back(back))
+
+
+@router.post("/transactions/{txn_id}/link", dependencies=[Depends(verify_csrf)])
+def txn_link_transfer(txn_id: int, request: Request, conn=Depends(get_conn),
+                      user=Depends(current_user), other_id: str = Form(""),
+                      unlink: str = Form(""), back: str = Form("/transactions")):
+    """Mark this transaction and another as the two sides of one transfer."""
+    _txn_or_404(conn, txn_id)
+    if unlink:
+        partner = transfers.linked_partner(conn, txn_id)
+        if partner:
+            transfers.unlink(conn, partner["link_id"])
+    elif other_id.isdigit():
+        transfers.link_pair(conn, txn_id, int(other_id), source="manual")
+    from urllib.parse import quote
+    return RedirectResponse(
+        f"/transactions/{txn_id}?back={quote(_safe_back(back), safe='/')}",
+        status_code=303)
 
 
 @router.post("/transactions/{txn_id}", dependencies=[Depends(verify_csrf)])

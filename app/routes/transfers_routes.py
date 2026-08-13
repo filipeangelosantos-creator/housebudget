@@ -18,6 +18,42 @@ def transfers_page(request: Request, conn=Depends(get_conn),
                   linked_count=transfers.linked_count(conn))
 
 
+@router.get("/transfers/manual")
+def transfers_manual(request: Request, conn=Depends(get_conn),
+                     user=Depends(current_user), side: str = "",
+                     q: str = "", account: str = ""):
+    """Pair two transactions by hand, in two steps: pick one side, then the
+    other. Needed whenever the amounts differ or the dates are far apart, which
+    the automatic matcher deliberately refuses to guess at."""
+    chosen = None
+    options: list[dict] = []
+    if side.isdigit():
+        chosen = conn.execute(
+            """SELECT t.id, t.date, t.description, t.amount_cents,
+                      a.name AS account_name
+               FROM transactions t JOIN accounts a ON a.id = t.account_id
+               WHERE t.id = ?""", (int(side),)).fetchone()
+        if chosen is not None:
+            options = transfers.manual_candidates(conn, int(side), limit=60)
+    accounts = conn.execute("SELECT id, name FROM accounts ORDER BY name").fetchall()
+    return render(request, conn, "transfers_manual.html",
+                  chosen=chosen, options=options, q=q, accounts=accounts,
+                  account=int(account) if account.isdigit() else None,
+                  pool=([] if chosen is not None else transfers.unpaired(
+                      conn, q, int(account) if account.isdigit() else None)))
+
+
+@router.post("/transfers/pair", dependencies=[Depends(verify_csrf)])
+def transfers_pair(request: Request, conn=Depends(get_conn),
+                   user=Depends(current_user), txn_a: int = Form(...),
+                   txn_b: int = Form(...)):
+    if transfers.link_pair(conn, txn_a, txn_b, source="manual"):
+        return RedirectResponse("/transfers?m=Pair+linked.", status_code=303)
+    return RedirectResponse(
+        f"/transfers/manual?side={txn_a}&m=Could+not+link+those+two.",
+        status_code=303)
+
+
 @router.post("/transfers/link-group", dependencies=[Depends(verify_csrf)])
 def transfers_link_group(request: Request, conn=Depends(get_conn),
                          user=Depends(current_user), group_key: str = Form(...),

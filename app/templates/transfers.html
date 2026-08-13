@@ -20,6 +20,12 @@ are matched, the pair is kept out of budgets and insights automatically.</p>
   </div>
 </form>
 
+<div class="banner">
+  <div class="grow">Know a pair the scan didn't find? Amounts that differ by a fee,
+    or sides posted weeks apart, are never guessed at automatically.</div>
+  <a class="btn small ghost" href="/transfers/manual">Pair manually</a>
+</div>
+
 {% if suggestions %}
 <div class="card" style="border-left:4px solid var(--warning)">
   <h2>Possible transfers ({{ suggestions|length }})</h2>

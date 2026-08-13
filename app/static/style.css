@@ -334,6 +334,10 @@ button.linklike { background: none; border: none; color: var(--accent);
               font-size: 14px; padding: 4px 0; }
 .split-line .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 
+.txn-check { width: 18px; height: 18px; flex-shrink: 0; margin-right: 2px; }
+.pattern-input { font-size: 14px; }
+.match-hint { margin: 4px 0 0; }
+
 /* --- review save-all bar ------------------------------------------------- */
 .save-all-bar {
   position: sticky; bottom: calc(var(--nav-h) + 8px); z-index: 15;

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
-from ..services import budgets
+from ..services import budgets, insights
 from .dashboard import clean_month
 
 router = APIRouter()
@@ -20,7 +20,10 @@ def budgets_page(request: Request, conn=Depends(get_conn),
                   month=m, month_label=budgets.month_label(m),
                   prev_month=budgets.shift_month(m, -1),
                   next_month=budgets.shift_month(m, 1),
-                  summary=summary, has_budget=has_budget, prior_month=prior)
+                  prior_label=budgets.month_label(summary.budget_from)
+                  if summary.budget_from else "",
+                  summary=summary, has_budget=has_budget, prior_month=prior,
+                  income=insights.expected_income(conn, m))
 
 
 @router.post("/budgets/save", dependencies=[Depends(verify_csrf)])
@@ -34,6 +37,31 @@ async def budgets_save(request: Request, conn=Depends(get_conn),
             if cat_id.isdigit():
                 budgets.set_budget(conn, int(cat_id), m,
                                    abs(parse_money_input(str(value))))
+    conn.commit()
+    return RedirectResponse(f"/budgets?month={m}", status_code=303)
+
+
+@router.post("/budgets/use-expected", dependencies=[Depends(verify_csrf)])
+def budgets_use_expected(request: Request, conn=Depends(get_conn),
+                         user=Depends(current_user), month: str = Form(...)):
+    """Budget each income category for the paydays that actually land this
+    month, rather than a flat figure that is wrong every other month."""
+    m = clean_month(month)
+    per_category: dict[str, int] = {}
+    for entry in insights.expected_income(conn, m)["detail"]:
+        per_category[entry["stream"].category] = (
+            per_category.get(entry["stream"].category, 0) + entry["expected"])
+    # Anything inherited from a previous month must become explicit now, or
+    # saving one category would drop the rest.
+    existing, inherited_from = budgets.effective_budgets(conn, m)
+    if inherited_from:
+        for cat_id, cents in existing.items():
+            budgets.set_budget(conn, cat_id, m, cents)
+    for name, cents in per_category.items():
+        row = conn.execute("SELECT id FROM categories WHERE name = ?",
+                           (name,)).fetchone()
+        if row:
+            budgets.set_budget(conn, row["id"], m, cents)
     conn.commit()
     return RedirectResponse(f"/budgets?month={m}", status_code=303)
 

@@ -118,6 +118,101 @@ def find_candidates(conn, max_days: int = MAX_DAYS_SUGGEST) -> list[Candidate]:
     return candidates
 
 
+MANUAL_MAX_DAYS = 21
+
+
+def manual_candidates(conn, txn_id: int, max_days: int = MANUAL_MAX_DAYS,
+                      limit: int = 20) -> list[dict]:
+    """Transactions that could be the other side of this one.
+
+    Deliberately looser than the automatic matcher: any opposite-signed,
+    unpaired transaction in a different account within a few weeks. Amounts
+    need not match — a wire fee or an FX difference makes the two sides differ,
+    and only you can say they belong together.
+    """
+    txn = conn.execute(
+        "SELECT id, account_id, date, amount_cents FROM transactions WHERE id = ?",
+        (txn_id,)).fetchone()
+    if txn is None:
+        return []
+    rows = conn.execute(
+        """SELECT t.id, t.date, t.description, t.amount_cents,
+                  a.name AS account_name,
+                  ABS(julianday(t.date) - julianday(?)) AS days_apart
+           FROM transactions t JOIN accounts a ON a.id = t.account_id
+           WHERE t.account_id != ?
+             AND ((? < 0 AND t.amount_cents > 0) OR (? > 0 AND t.amount_cents < 0))
+             AND ABS(julianday(t.date) - julianday(?)) <= ?
+             AND NOT EXISTS (SELECT 1 FROM transfer_links l
+                             WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)
+           ORDER BY ABS(ABS(t.amount_cents) - ?), days_apart
+           LIMIT ?""",
+        (txn["date"], txn["account_id"], txn["amount_cents"], txn["amount_cents"],
+         txn["date"], max_days, abs(txn["amount_cents"]), limit)).fetchall()
+    out = []
+    for r in rows:
+        entry = dict(r)
+        entry["days_apart"] = int(entry["days_apart"])
+        entry["exact_amount"] = abs(r["amount_cents"]) == abs(txn["amount_cents"])
+        out.append(entry)
+    return out
+
+
+def unpaired(conn, q: str = "", account: int | None = None,
+             limit: int = 60) -> list[dict]:
+    """Transactions not yet part of a pair — the pool to pick a side from.
+
+    The automatic matcher only offers pairs it spotted itself; this is what you
+    search when you know two rows belong together and it didn't notice.
+    """
+    where = ["NOT EXISTS (SELECT 1 FROM transfer_links l "
+             "WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)"]
+    params: list = []
+    if q.strip():
+        where.append("(t.description LIKE ? OR t.normalized_desc LIKE ?)")
+        params.extend([f"%{q.strip()}%", f"%{q.strip().upper()}%"])
+    if account:
+        where.append("t.account_id = ?")
+        params.append(account)
+    rows = conn.execute(
+        f"""SELECT t.id, t.date, t.description, t.amount_cents,
+                   a.name AS account_name
+            FROM transactions t JOIN accounts a ON a.id = t.account_id
+            WHERE {' AND '.join(where)}
+            ORDER BY t.date DESC, t.id DESC LIMIT ?""", params + [limit]).fetchall()
+    return [dict(r) for r in rows]
+
+
+def link_pair(conn, txn_a: int, txn_b: int, source: str = "manual") -> bool:
+    """Link two transactions whichever way round they were given."""
+    rows = {r["id"]: r["amount_cents"] for r in conn.execute(
+        "SELECT id, amount_cents FROM transactions WHERE id IN (?, ?)",
+        (txn_a, txn_b)).fetchall()}
+    if len(rows) != 2 or txn_a == txn_b:
+        return False
+    # One side has to leave and the other arrive, or it isn't a movement.
+    if (rows[txn_a] < 0) == (rows[txn_b] < 0):
+        return False
+    if rows[txn_a] < 0:
+        return link(conn, txn_a, txn_b, source)
+    return link(conn, txn_b, txn_a, source)
+
+
+def linked_partner(conn, txn_id: int) -> dict | None:
+    """The other side of this transaction, if it is part of a pair."""
+    row = conn.execute(
+        """SELECT l.id AS link_id, l.source,
+                  t.id, t.date, t.description, t.amount_cents,
+                  a.name AS account_name
+           FROM transfer_links l
+           JOIN transactions t ON t.id = CASE WHEN l.out_txn_id = ?
+                                              THEN l.in_txn_id ELSE l.out_txn_id END
+           JOIN accounts a ON a.id = t.account_id
+           WHERE l.out_txn_id = ? OR l.in_txn_id = ?""",
+        (txn_id, txn_id, txn_id)).fetchone()
+    return dict(row) if row else None
+
+
 def link(conn, out_txn_id: int, in_txn_id: int, source: str = "manual") -> bool:
     """Record a pair. Returns False when either side is already linked."""
     try:

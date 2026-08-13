@@ -33,6 +33,19 @@
 <p class="small muted" style="margin-top:-6px">You kept {{ summary.savings_rate }}% of this month's income.</p>
 {% endif %}
 
+{% if income.upcoming %}
+<p class="small muted" style="margin-top:-2px">
+  {{ income.upcoming|length }} more payday{{ 's' if income.upcoming|length != 1 }} to
+  come this month ({% for d in income.upcoming %}{{ d.strftime('%-d %b') }}{{ ', ' if not loop.last }}{% endfor %}) —
+  expecting {{ currency }}{{ income.total|money }} in total.
+</p>
+{% elif income.total and income.received %}
+<p class="small muted" style="margin-top:-2px">
+  Every payday for {{ month_label }} has landed — {{ currency }}{{ income.received|money }}
+  received against an expected {{ currency }}{{ income.total|money }}.
+</p>
+{% endif %}
+
 {% if summary.uncategorized_count > 0 %}
 <a href="/review" style="text-decoration:none">
   <div class="banner warn">

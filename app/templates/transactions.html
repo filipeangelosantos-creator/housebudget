@@ -1,8 +1,9 @@
 {% extends "base.html" %}
-{% from "_macros.html" import amount with context %}
+{% from "_macros.html" import amount, category_select with context %}
 {% block title %}Transactions{% endblock %}
 {% block content %}
-{% set back = (request.url.path ~ ('?' ~ request.url.query if request.url.query else ''))|urlencode %}
+{# Raw for form fields, encoded when nested in a query string. #}
+{% set back = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
 
 <div class="spread">
   <h1>Transactions</h1>
@@ -36,24 +37,60 @@
   {% if not show_all_months %} · <a href="/transactions?month=all&account={{ account or '' }}&category={{ category }}&q={{ q|urlencode }}">show all months</a>{% endif %}
 </p>
 
-<div class="card">
-  {% for t in rows %}
-  <div class="txn">
-    <div class="mid">
-      <div class="desc"><a href="/transactions/{{ t.id }}?back={{ back }}">{{ t.description }}</a></div>
-      <div class="meta">{{ t.date }} · {{ t.account_name }} ·
-        {% if t.n_splits %}<span class="chip">split · {{ t.n_splits }} categories</span>
-        {% elif t.category_name %}<span class="chip">{{ t.category_name }}</span>
-        {% else %}<span class="chip uncat">uncategorized</span>{% endif %}
-        {% if t.needs_review %}<span class="chip uncat">confirm?</span>{% endif %}
+<form method="post" action="/transactions/bulk" id="bulk-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="back" value="{{ back }}">
+  <input type="hidden" name="f_month" value="{{ '' if show_all_months else month }}">
+  <input type="hidden" name="f_account" value="{{ account or '' }}">
+  <input type="hidden" name="f_category" value="{{ category }}">
+  <input type="hidden" name="f_q" value="{{ q }}">
+
+  <div class="card">
+    {% if rows %}
+    <label class="check" style="margin:0 0 6px">
+      <input type="checkbox" id="select-all">
+      <span class="small muted">Select all on this page</span>
+    </label>
+    {% endif %}
+    {% for t in rows %}
+    <div class="txn">
+      <input type="checkbox" name="txn" value="{{ t.id }}" class="txn-check"
+             aria-label="Select {{ t.description|truncate(40) }}">
+      <div class="mid">
+        <div class="desc"><a href="/transactions/{{ t.id }}?back={{ back|urlencode }}">{{ t.description }}</a></div>
+        <div class="meta">{{ t.date }} · {{ t.account_name }} ·
+          {% if t.n_splits %}<span class="chip">split · {{ t.n_splits }} categories</span>
+          {% elif t.category_name %}<span class="chip">{{ t.category_name }}</span>
+          {% else %}<span class="chip uncat">uncategorized</span>{% endif %}
+          {% if t.needs_review %}<span class="chip uncat">confirm?</span>{% endif %}
+        </div>
       </div>
+      <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
     </div>
-    <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+    {% else %}
+    <p class="muted">Nothing here yet. <a href="/import">Import a statement</a> or <a href="/transactions/new">add one manually</a>.</p>
+    {% endfor %}
   </div>
-  {% else %}
-  <p class="muted">Nothing here yet. <a href="/import">Import a statement</a> or <a href="/transactions/new">add one manually</a>.</p>
-  {% endfor %}
-</div>
+
+  {% if rows %}
+  <div class="save-all-bar" id="bulk-bar" hidden>
+    <span class="small"><strong id="bulk-count">0</strong> selected</span>
+    <div class="form-row" style="flex:1; gap:8px">
+      {# Blank first, so a stray tap can't file everything under one category. #}
+      {{ category_select('bulk_category', categories, blank_label='Choose a category…') }}
+      <button class="btn" type="submit" name="scope" value="selected"
+              style="flex:0 0 auto">Apply</button>
+    </div>
+  </div>
+  {% if total > rows|length %}
+  <p class="small muted" id="bulk-all-hint" hidden>
+    Or <button class="linklike" type="submit" name="scope" value="filtered"
+      data-confirm-bulk="Set the category on all {{ total }} transactions matching these filters?"
+      >apply to all {{ total }} matching these filters</button>.
+  </p>
+  {% endif %}
+  {% endif %}
+</form>
 
 {% if pages > 1 %}
 <div class="pager">
