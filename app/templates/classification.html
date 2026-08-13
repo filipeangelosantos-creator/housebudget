@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, category_select with context %}
+{% block title %}Classification{% endblock %}
+{% block content %}
+
+<div class="spread">
+  <h1>Classification</h1>
+  <a class="btn small ghost" href="/rules">Rules</a>
+</div>
+<p class="small muted">Every merchant the app filed for you, biggest first. The
+review queue only shows what it couldn't place — this is what it placed without
+asking. Change any of them and save.</p>
+
+{% if request.query_params.get('m') %}
+<div class="msg-box">{{ request.query_params.get('m') }}</div>
+{% endif %}
+
+<form method="get" action="/classification">
+  <div class="filters">
+    <select name="source" data-autosubmit>
+      <option value="auto" {{ 'selected' if source == 'auto' }}>Filed by the app</option>
+      <option value="user" {{ 'selected' if source == 'user' }}>Filed by you</option>
+      <option value="all" {{ 'selected' if source == 'all' }}>Everything filed</option>
+    </select>
+    <select name="account" data-autosubmit>
+      <option value="">All accounts</option>
+      {% for a in accounts %}
+      <option value="{{ a.id }}" {{ 'selected' if account == a.id }}>{{ a.name }}</option>
+      {% endfor %}
+    </select>
+    <input type="month" name="month" value="{{ month }}" data-autosubmit>
+    <input type="text" name="q" value="{{ q }}" placeholder="Search merchant…"
+           enterkeyhint="search">
+  </div>
+  <noscript><button class="btn small ghost" type="submit">Filter</button></noscript>
+</form>
+
+{% if groups %}
+<p class="small muted">{{ groups|length }} merchant{{ 's' if groups|length != 1 }} ·
+{{ covered }} transaction{{ 's' if covered != 1 }}{% if month %} in {{ month }}{% endif %}.
+Changing one re-files every transaction shown here for that merchant.</p>
+
+<form method="post" action="/classification/save" id="classify-form">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="f_month" value="{{ month }}">
+  <input type="hidden" name="f_account" value="{{ account or '' }}">
+  <input type="hidden" name="f_source" value="{{ source }}">
+
+  {% for g in groups %}
+  <div class="card">
+    <input type="hidden" name="mk_{{ loop.index }}" value="{{ g.merchant_key }}">
+    <input type="hidden" name="was_{{ loop.index }}" value="{{ g.category_id }}">
+    <div class="spread">
+      <div>
+        <strong>{{ g.merchant_key }}</strong>
+        <div class="small muted">{{ g.n }} transaction{{ 's' if g.n != 1 }} ·
+          {{ g.first_date }} → {{ g.last_date }}</div>
+      </div>
+      <div class="amt {{ 'pos' if g.total > 0 }}">{{ amount(g.total) }}</div>
+    </div>
+
+    <div class="chips">
+      <span class="chip{{ ' warn' if g.orphan_rule }}">{{ g.why }}</span>
+      {% if g.mixed %}<span class="chip uncat">split across
+        {{ g.buckets|length }} categories</span>{% endif %}
+      {% if g.n_unfiled %}<span class="chip uncat">{{ g.n_unfiled }} not filed
+        yet</span>{% endif %}
+      {% if g.n_split %}<span class="chip">{{ g.n_split }} itemised</span>{% endif %}
+    </div>
+
+    <div class="form-row" style="margin-top:8px">
+      {{ category_select('cat_' ~ loop.index, categories, selected=g.category_id,
+                         include_blank=False) }}
+    </div>
+    {% if g.mixed %}
+    <p class="small muted">Currently {% for b in g.buckets %}{{ b.n }} ×
+      {{ b.category_name }}{{ ', ' if not loop.last }}{% endfor %} — saving files
+      them all as one.</p>
+    {% endif %}
+    <label class="check" style="margin:6px 0 0">
+      <input type="checkbox" name="remember_{{ loop.index }}" value="1" checked>
+      <span class="small">Remember for future imports of this merchant</span></label>
+
+    <p class="small muted" style="margin:6px 0 0">
+      {% set base = '/classification?month=' ~ (month or 'all') ~ '&account=' ~ (account or '') ~ '&source=' ~ source ~ '&q=' ~ q|urlencode %}
+      {% if expand == g.merchant_key %}
+      <a href="{{ base }}">Hide the {{ g.n }} transaction{{ 's' if g.n != 1 }}</a>
+      {% else %}
+      <a href="{{ base }}&expand={{ g.merchant_key|urlencode }}#detail">Show the {{ g.n }} transaction{{ 's' if g.n != 1 }}</a>
+      {% endif %}
+      · <a href="/transactions?month=all&q={{ g.sample[:24]|urlencode }}">open in Activity</a>
+    </p>
+
+    {% if expand == g.merchant_key %}
+    <div id="detail" class="split-view" style="margin-top:8px">
+      {% for t in detail %}
+      <div class="split-line">
+        <span><a href="/transactions/{{ t.id }}">{{ t.description|truncate(40) }}</a>
+          <span class="muted">{{ t.date }} · {{ t.account_name }}</span></span>
+        <span class="num">{{ amount(t.amount_cents) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  <div class="save-all-bar" id="classify-bar" hidden>
+    <span class="small"><strong id="classify-count">0</strong> changed</span>
+    <button class="btn" type="submit">Save changes</button>
+  </div>
+  <noscript><div class="actions">
+    <button class="btn" type="submit">Save changes</button></div></noscript>
+</form>
+{% else %}
+<div class="card"><p class="muted">
+  {% if source == 'auto' %}Nothing has been filed automatically yet — import a
+  statement, or set up a <a href="/rules">rule</a>.
+  {% else %}Nothing matches those filters.{% endif %}</p></div>
+{% endif %}
+
+{% endblock %}

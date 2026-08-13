@@ -140,7 +140,8 @@ async def transactions_bulk(request: Request, conn=Depends(get_conn),
         conn.execute(f"DELETE FROM transaction_splits WHERE transaction_id IN ({marks})",
                      chunk)
         conn.execute(
-            f"UPDATE transactions SET category_id = ?, needs_review = 0 "
+            f"UPDATE transactions SET category_id = ?, needs_review = 0, "
+            f"classified_by = 'user', rule_id = NULL "
             f"WHERE id IN ({marks})", [category] + chunk)
     conn.commit()
     return RedirectResponse(back, status_code=303)
@@ -170,10 +171,11 @@ def txn_new_submit(request: Request, conn=Depends(get_conn),
     conn.execute(
         "INSERT INTO transactions (account_id, date, amount_cents, description, "
         "normalized_desc, merchant_key, category_id, dedupe_hash, notes, manual, "
-        "created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?)",
+        "classified_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
         (account_id, txn_date[:10], cents, desc, norm, classify.merchant_key(desc),
          int(category_id) if category_id.isdigit() else None,
-         f"manual|{uuid.uuid4().hex}", notes.strip(), utcnow()))
+         f"manual|{uuid.uuid4().hex}", notes.strip(),
+         "user" if category_id.isdigit() else "", utcnow()))
     conn.commit()
     return RedirectResponse("/transactions", status_code=303)
 
@@ -240,7 +242,8 @@ def txn_edit_submit(txn_id: int, request: Request, conn=Depends(get_conn),
         # Choosing a single category replaces the split allocation.
         splits_svc.clear_splits(conn, txn_id)
     conn.execute(
-        "UPDATE transactions SET category_id = ?, notes = ?, needs_review = 0 "
+        "UPDATE transactions SET category_id = ?, notes = ?, needs_review = 0, "
+        "classified_by = 'user', rule_id = NULL "
         "WHERE id = ?", (cat, notes.strip(), txn_id))
     conn.commit()
     if remember and cat and pattern.strip():
@@ -346,7 +349,8 @@ def _apply_review_choice(conn, txn_id: int, category_id: int,
     if txn is None:
         return
     conn.execute(
-        "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
+        "UPDATE transactions SET category_id = ?, needs_review = 0, "
+        "classified_by = 'user', rule_id = NULL WHERE id = ?",
         (category_id, txn_id))
     conn.commit()
     if remember:

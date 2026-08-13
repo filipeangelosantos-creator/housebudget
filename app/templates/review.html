@@ -3,12 +3,17 @@
 {% block title %}Review{% endblock %}
 {% block content %}
 
-<h1>Review queue</h1>
+<div class="spread">
+  <h1>Review queue</h1>
+  <a class="btn small ghost" href="/classification">What the app filed</a>
+</div>
 
 {% if total == 0 and confirm_total == 0 %}
 <div class="card"><p style="margin:4px 0">🎉 Everything is categorized and confirmed.</p>
 <p class="small muted">New imports land here when the app isn't sure, or when a
-shop like Costco or Amazon usually covers more than one category.</p></div>
+shop like Costco or Amazon usually covers more than one category.</p>
+<p class="small muted">To check the ones it filed <em>without</em> asking, see
+<a href="/classification">what the app filed</a>.</p></div>
 {% endif %}
 
 {% if confirms %}

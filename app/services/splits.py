@@ -124,7 +124,8 @@ def save_splits(conn, txn_id: int, splits: list[Split]) -> None:
     # categorized?" checks and the transaction list still work.
     biggest = max(parts, key=lambda s: abs(s.amount_cents))
     conn.execute(
-        "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
+        "UPDATE transactions SET category_id = ?, needs_review = 0, "
+        "classified_by = 'user', rule_id = NULL WHERE id = ?",
         (biggest.category_id, txn_id))
     conn.commit()
 
@@ -138,7 +139,8 @@ def confirm_category(conn, txn_id: int, category_id: int | None = None) -> None:
     """Accept the current (or given) category and stop asking about it."""
     if category_id is not None:
         conn.execute(
-            "UPDATE transactions SET category_id = ?, needs_review = 0 WHERE id = ?",
+            "UPDATE transactions SET category_id = ?, needs_review = 0, "
+            "classified_by = 'user', rule_id = NULL WHERE id = ?",
             (category_id, txn_id))
     else:
         conn.execute("UPDATE transactions SET needs_review = 0 WHERE id = ?", (txn_id,))

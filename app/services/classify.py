@@ -130,11 +130,17 @@ def rule_matches(rule: dict, normalized: str, mkey: str) -> bool:
     return False
 
 
-def classify(rules: list[dict], normalized: str, mkey: str) -> int | None:
+def matching_rule(rules: list[dict], normalized: str, mkey: str) -> dict | None:
+    """The rule that decides this description, or None."""
     for rule in rules:
         if rule_matches(rule, normalized, mkey):
-            return rule["category_id"]
+            return rule
     return None
+
+
+def classify(rules: list[dict], normalized: str, mkey: str) -> int | None:
+    rule = matching_rule(rules, normalized, mkey)
+    return rule["category_id"] if rule else None
 
 
 def create_rule(conn, pattern: str, category_id: int, match_type: str = "contains",
@@ -160,13 +166,38 @@ def apply_rules_to_uncategorized(conn, only_rule_id: int | None = None) -> int:
         "WHERE category_id IS NULL"
     ).fetchall()
     for row in rows:
-        cat = classify(rules, row["normalized_desc"], row["merchant_key"])
-        if cat is not None:
-            conn.execute("UPDATE transactions SET category_id = ? WHERE id = ?",
-                         (cat, row["id"]))
+        rule = matching_rule(rules, row["normalized_desc"], row["merchant_key"])
+        if rule is not None:
+            conn.execute(
+                "UPDATE transactions SET category_id = ?, classified_by = 'rule', "
+                "rule_id = ? WHERE id = ?", (rule["category_id"], rule["id"], row["id"]))
             updated += 1
     conn.commit()
     return updated
+
+
+def label_existing_classifications(conn) -> int:
+    """One-off labelling for rows filed before we recorded who filed them.
+
+    A row whose category is what a rule produces today is attributed to that
+    rule; anything else is treated as your own choice, which is the safe way
+    round — the audit list then never hides a category you set by hand.
+    """
+    rules = load_rules(conn)
+    labelled = 0
+    for row in conn.execute(
+            "SELECT id, normalized_desc, merchant_key, category_id FROM transactions "
+            "WHERE category_id IS NOT NULL AND classified_by = ''").fetchall():
+        rule = matching_rule(rules, row["normalized_desc"], row["merchant_key"])
+        if rule is not None and rule["category_id"] == row["category_id"]:
+            conn.execute("UPDATE transactions SET classified_by = 'rule', rule_id = ? "
+                         "WHERE id = ?", (rule["id"], row["id"]))
+        else:
+            conn.execute("UPDATE transactions SET classified_by = 'user' WHERE id = ?",
+                         (row["id"],))
+        labelled += 1
+    conn.commit()
+    return labelled
 
 
 def count_rule_matches(conn, pattern: str, match_type: str) -> int:

@@ -165,7 +165,9 @@ def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
             continue
         norm = classify.normalize_desc(row.description)
         mkey = classify.merchant_key(row.description)
-        cat = classify.classify(rules, norm, mkey)
+        rule = classify.matching_rule(rules, norm, mkey)
+        cat = rule["category_id"] if rule else None
+        source = "rule" if rule else ""
         # Big-box / marketplace charges get a guess plus a request to confirm,
         # because one receipt there often spans several budget categories.
         prompt = splits.should_prompt_split(conn, norm, mkey, row.amount_cents)
@@ -173,14 +175,16 @@ def commit_import(conn, account_id: int, filename: str, file_bytes: bytes,
             suggestion = splits.suggest_category(conn, mkey)
             if suggestion:
                 cat = suggestion["category_id"]
+                source = "guess"
         conn.execute(
             "INSERT INTO transactions (account_id, import_id, date, amount_cents, "
             "description, normalized_desc, merchant_key, category_id, fitid, "
-            "dedupe_hash, needs_review, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "dedupe_hash, needs_review, classified_by, rule_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (account_id, import_id, str(row.date), row.amount_cents,
              str(row.description)[:300], norm[:300], mkey, cat, row.fitid, h,
-             1 if (prompt and cat is not None) else 0, now))
+             1 if (prompt and cat is not None) else 0, source,
+             rule["id"] if rule else None, now))
         existing.add(h)
         added += 1
         if cat:

@@ -79,3 +79,75 @@ def test_init_is_idempotent():
     db.init_db(conn)   # must not fail on re-run
     assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
     conn.close()
+
+
+def test_v1_database_gets_its_categories_attributed_on_the_way_to_v4():
+    """The audit page needs to know who filed each row. A database that predates
+    the column gets labelled by what the rules say today — a row a rule would
+    produce is that rule's, anything else stays yours."""
+    conn = db.connect(":memory:")
+    conn.executescript(V1_SCHEMA)
+    conn.execute("PRAGMA user_version = 1")
+    conn.execute("INSERT INTO accounts (id, name, type, created_at) "
+                 "VALUES (1, 'Checking', 'checking', 'now')")
+    conn.execute("INSERT INTO category_groups (id, name, kind) VALUES (1, 'Food', 'expense')")
+    conn.execute("INSERT INTO categories (id, group_id, name) VALUES (1, 1, 'Groceries')")
+    conn.execute("INSERT INTO categories (id, group_id, name) VALUES (2, 1, 'Restaurants')")
+    conn.execute("INSERT INTO rules (id, pattern, match_type, category_id, priority, "
+                 "source, created_at) VALUES (1, 'MERCADO', 'contains', 1, 10, "
+                 "'learned', 'now')")
+    rows = [
+        (1, "MERCADO CENTRAL", 1, "h1"),    # a rule produces exactly this
+        (2, "MERCADO CENTRAL", 2, "h2"),    # same shop, filed elsewhere by hand
+        (3, "PIZZA PLACE", 2, "h3"),        # no rule at all
+        (4, "UNFILED SHOP", None, "h4"),    # never categorized
+    ]
+    for tid, desc, cat, h in rows:
+        conn.execute(
+            "INSERT INTO transactions (id, account_id, date, amount_cents, description, "
+            "normalized_desc, merchant_key, category_id, dedupe_hash, created_at) "
+            "VALUES (?, 1, '2026-08-01', -5000, ?, ?, ?, ?, ?, 'now')",
+            (tid, desc, desc, desc, cat, h))
+    conn.commit()
+
+    db.init_db(conn)
+
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    assert conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] == 4
+    got = {r["id"]: (r["classified_by"], r["rule_id"]) for r in
+           conn.execute("SELECT id, classified_by, rule_id FROM transactions")}
+    assert got[1] == ("rule", 1)
+    assert got[2] == ("user", None)
+    assert got[3] == ("user", None)
+    assert got[4] == ("", None)          # nothing to attribute
+    conn.close()
+
+
+def test_v3_database_upgrades_to_v4():
+    """The realistic path for an already-running install: a database built by
+    the earlier migrations, not by today's schema."""
+    conn = db.connect(":memory:")
+    conn.executescript(V1_SCHEMA)
+    for target, sql in db.MIGRATIONS:
+        if target > 3:
+            break
+        conn.executescript(sql)
+    conn.execute("PRAGMA user_version = 3")
+    conn.execute("INSERT INTO accounts (id, name, type, created_at) "
+                 "VALUES (1, 'Checking', 'checking', 'now')")
+    conn.execute("INSERT INTO category_groups (id, name, kind) VALUES (1, 'Food', 'expense')")
+    conn.execute("INSERT INTO categories (id, group_id, name) VALUES (1, 1, 'Groceries')")
+    conn.execute(
+        "INSERT INTO transactions (account_id, date, amount_cents, description, "
+        "normalized_desc, merchant_key, category_id, dedupe_hash, created_at) "
+        "VALUES (1, '2026-08-01', -5000, 'SHOP', 'SHOP', 'SHOP', 1, 'h1', 'now')")
+    conn.commit()
+
+    db.init_db(conn)
+
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == db.SCHEMA_VERSION
+    row = conn.execute("SELECT category_id, classified_by, rule_id "
+                       "FROM transactions").fetchone()
+    assert row["category_id"] == 1              # the category survived
+    assert (row["classified_by"], row["rule_id"]) == ("user", None)
+    conn.close()

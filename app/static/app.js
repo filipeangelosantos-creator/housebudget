@@ -86,6 +86,25 @@
     refresh();
   }
 
+  // Classification audit: only the merchants you actually changed get saved,
+  // so say how many that is rather than implying the whole page is rewritten.
+  var classifyForm = document.getElementById("classify-form");
+  if (classifyForm) {
+    var classifyBar = document.getElementById("classify-bar");
+    var classifyCount = document.getElementById("classify-count");
+    var countChanged = function () {
+      var n = 0;
+      classifyForm.querySelectorAll('select[name^="cat_"]').forEach(function (sel) {
+        var was = classifyForm.querySelector('[name="was_' + sel.name.slice(4) + '"]');
+        if (was && sel.value !== was.value) n++;
+      });
+      if (classifyCount) classifyCount.textContent = String(n);
+      if (classifyBar) classifyBar.hidden = n === 0;
+    };
+    classifyForm.addEventListener("change", countChanged);
+    countChanged();
+  }
+
   // Rule patterns: say how many transactions the text you typed would catch,
   // so "too short" and "too broad" are visible before you commit to it.
   var patternInputs = document.querySelectorAll(".pattern-input[data-match-hint]");

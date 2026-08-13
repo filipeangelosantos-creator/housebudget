@@ -202,6 +202,9 @@ a { color: var(--accent); }
         background: var(--track); color: var(--ink-2); font-size: 11.5px; }
 .chip.uncat { background: color-mix(in srgb, var(--warning) 22%, var(--surface));
               color: var(--ink); }
+.chip.warn { background: color-mix(in srgb, var(--critical) 20%, var(--surface));
+             color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);
@@ -347,6 +350,9 @@ button.linklike { background: none; border: none; color: var(--accent);
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
 }
 @media (min-width: 800px) { .save-all-bar { bottom: 12px; } }
+/* Any `display:` here beats the UA stylesheet's rule for [hidden], which is how
+   a bar meant to appear on first selection showed up empty on page load. */
+[hidden] { display: none !important; }
 
 /* --- transfer pairs ------------------------------------------------------ */
 .transfer-pair { display: flex; align-items: center; gap: 10px; margin: 10px 0 4px; }

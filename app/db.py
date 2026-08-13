@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA = """
 CREATE TABLE users (
@@ -76,6 +76,13 @@ CREATE TABLE transactions (
     manual INTEGER NOT NULL DEFAULT 0,
     -- 1 when the app wants you to confirm the category (mixed-basket merchant)
     needs_review INTEGER NOT NULL DEFAULT 0,
+    -- How the category was decided: '' none yet, 'rule' a rule matched,
+    -- 'guess' the app copied what you did with this merchant before,
+    -- 'user' you chose it. Lets you audit only what the app decided.
+    classified_by TEXT NOT NULL DEFAULT '',
+    -- SET NULL, not cascade: deleting a rule must never delete your
+    -- transactions. The row keeps its category and shows as needing review.
+    rule_id INTEGER REFERENCES rules(id) ON DELETE SET NULL,
     created_at TEXT NOT NULL
 );
 CREATE INDEX idx_txn_date ON transactions(date);
@@ -216,6 +223,11 @@ MIGRATIONS: list[tuple[int, str]] = [
     FROM transactions t
     LEFT JOIN transaction_splits s ON s.transaction_id = t.id;
     """),
+    (4, """
+    ALTER TABLE transactions ADD COLUMN classified_by TEXT NOT NULL DEFAULT '';
+    ALTER TABLE transactions ADD COLUMN rule_id INTEGER REFERENCES rules(id) ON DELETE SET NULL;
+    CREATE INDEX idx_txn_classified ON transactions(classified_by);
+    """),
 ]
 
 
@@ -241,12 +253,21 @@ def init_db(conn: sqlite3.Connection) -> None:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
         conn.commit()
         version = SCHEMA_VERSION
+    crossed = set()
     for target, sql in MIGRATIONS:
         if version < target:
             conn.executescript(sql)
             conn.execute(f"PRAGMA user_version = {target}")
             conn.commit()
             version = target
+            crossed.add(target)
+    if 4 in crossed:
+        # Rows imported before this column existed carry no record of who chose
+        # their category. Label them by what the rules say today: if a rule
+        # produces the category a row already has, that rule owns it — which is
+        # exactly what you would change to re-file it.
+        from .services.classify import label_existing_classifications
+        label_existing_classifications(conn)
 
 
 def get_setting(conn, key: str, default: str = "") -> str:
