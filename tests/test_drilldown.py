@@ -498,3 +498,82 @@ def test_the_link_out_is_labelled_with_what_it_actually_opens(signed_in):
                       "&page_month=2026-08")
     assert "July 2026, to the 13th —" in r.text          # what you are looking at
     assert ">Open July 2026</a>" in r.text               # what the link gives you
+
+
+# --- the roll-up opens too -----------------------------------------------------
+
+def nine_categories(conn):
+    account(conn)
+    names = ["Groceries", "Fuel", "Clothing", "Restaurants & Takeout", "Pharmacy",
+             "Home Maintenance", "Gifts & Donations", "Hobbies", "Pets"]
+    for i, name in enumerate(names):
+        add_txn(conn, 1, "2026-08-02", -(9 - i) * 1000, f"SHOP {name}",
+                category(conn, name))
+    return names
+
+
+def test_other_opens_into_the_categories_rolled_up_inside_it(conn):
+    """Regression: "Other" was the one segment you couldn't look inside, which
+    made it the one figure you couldn't account for."""
+    names = nine_categories(conn)
+    composition = insights.category_composition(conn, "2026-08", 1)
+    other = next(s for s in composition["series"] if s["name"] == "Other")
+
+    rows = drill.rows_for(conn, "other", "2026-08", "2026-08")
+    assert -total(rows) == other["monthly"][-1]
+    # the three smallest, which are exactly the ones outside the top six
+    assert sorted(r["category"] for r in rows) == sorted(names[6:])
+
+
+def test_other_is_ranked_by_the_chart_not_by_the_month_being_opened(conn):
+    """The roll-up is decided across the whole chart, so opening July's bar has
+    to use the chart's ranking, not July's own."""
+    account(conn)
+    groceries, pets = category(conn, "Groceries"), category(conn, "Pets")
+    for m in ("2026-07", "2026-08"):
+        add_txn(conn, 1, f"{m}-02", -90000, "BIG", groceries)
+        add_txn(conn, 1, f"{m}-03", -1000, "SMALL", pets)
+    for name in ("Fuel", "Clothing", "Pharmacy", "Hobbies", "Education"):
+        add_txn(conn, 1, "2026-08-04", -50000, f"SHOP {name}", category(conn, name))
+
+    rows = drill.rows_for(conn, "other", "2026-07", "2026-08")
+    assert [r["description"] for r in rows] == ["SMALL"]     # Pets fell outside
+
+
+def test_the_stacked_chart_marks_other_as_openable(conn):
+    from app.services import charts
+    nine_categories(conn)
+    svg = charts.stacked_chart(insights.category_composition(conn, "2026-08", 3))
+    assert 'data-drill-kind="other"' in svg
+    # keyed by the month the chart is anchored at, which decides the ranking
+    assert 'data-drill-kind="other" data-drill-month="2026-08" role="button" ' \
+           'tabindex="0" aria-expanded="false" data-drill-key="2026-08"' in svg
+
+
+def test_the_other_panel_says_what_it_is(signed_in):
+    conn = open_db()
+    for i, name in enumerate(["Groceries", "Fuel", "Clothing",
+                              "Restaurants & Takeout", "Pharmacy",
+                              "Home Maintenance", "Gifts & Donations"]):
+        add_txn(conn, 1, "2026-08-02", -(9 - i) * 1000, f"SHOP {name}",
+                category(conn, name))
+    conn.close()
+
+    r = signed_in.get("/insights/drill?kind=other&key=2026-08&month=2026-08"
+                      "&page_month=2026-08")
+    assert "Other" in r.text
+    assert "outside the biggest categories" in r.text
+    assert "SHOP Gifts &amp; Donations" in r.text     # escaped, and it is the row
+
+
+def test_the_legend_entry_for_other_opens_it_as_well(signed_in):
+    conn = open_db()
+    for i, name in enumerate(["Groceries", "Fuel", "Clothing",
+                              "Restaurants & Takeout", "Pharmacy",
+                              "Home Maintenance", "Gifts & Donations"]):
+        add_txn(conn, 1, "2026-08-02", -(9 - i) * 1000, f"SHOP {name}",
+                category(conn, name))
+    conn.close()
+
+    r = signed_in.get("/insights?month=2026-08")
+    assert 'data-drill-kind="other"' in r.text

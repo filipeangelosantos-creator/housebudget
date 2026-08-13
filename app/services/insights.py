@@ -185,9 +185,20 @@ def category_composition(conn, month: str, n: int = 12, top: int = 6) -> dict:
     if rest:
         other = [sum(max(0, per_month[name].get(m, 0)) for name in rest) for m in seq]
         if any(other):
+            # The names travel with it so the bar can be opened: "Other" is a
+            # real figure made of real transactions, and the one segment you
+            # can't look inside is the one you can't account for.
             series.append({"name": "Other", "total": sum(totals[n] for n in rest),
-                           "monthly": other})
+                           "monthly": other, "members": rest})
     return {"months": seq, "series": series}
+
+
+def composition_others(conn, month: str, n: int = 12, top: int = 6) -> list[str]:
+    """The categories rolled into "Other" for a chart anchored at `month`."""
+    for s in category_composition(conn, month, n, top)["series"]:
+        if s["name"] == "Other":
+            return s["members"]
+    return []
 
 
 @dataclass
@@ -521,3 +532,218 @@ def anomalies(conn, month: str, factor: float = 1.5,
                                current=spent, average=avg))
     out.sort(key=lambda a: -(a.current - a.average))
     return out
+
+
+# --- bills that don't arrive every month -------------------------------------
+
+# Bands are wide because real billing dates wander: a "quarterly" bill lands
+# 89 days after the last one, then 94, then 87. Anything outside them is
+# irregular spending, which is not a bill you can plan for.
+CADENCE_BANDS = [
+    (50, 74, "every 2 months", 2),
+    (75, 115, "quarterly", 3),
+    (150, 215, "every 6 months", 6),
+    (320, 400, "yearly", 12),
+]
+
+
+@dataclass
+class PeriodicBill:
+    """A bill that arrives less often than monthly.
+
+    Budgeting one of these per month is wrong twice over: the months it misses
+    look under budget, and the month it lands looks like overspending. What you
+    want is the amount to put aside each month, and when it next falls due.
+    """
+    merchant: str
+    category: str | None
+    category_id: int | None
+    cadence: str
+    months_per: int
+    typical_cents: int          # what one bill costs
+    last_date: date
+    next_due: date
+    times_seen: int
+
+    @property
+    def monthly_cents(self) -> int:
+        """What to set aside each month to have it ready when it lands."""
+        return round(self.typical_cents / self.months_per)
+
+    @property
+    def next_due_month(self) -> str:
+        return self.next_due.strftime("%Y-%m")
+
+    def due_in(self, month: str) -> bool:
+        return self.next_due_month == month
+
+
+def _median_int(values: list[int]) -> int:
+    ordered = sorted(values)
+    return ordered[len(ordered) // 2] if ordered else 0
+
+
+def periodic_bills(conn, month: str, lookback: int = 24) -> list[PeriodicBill]:
+    """Recurring charges whose interval is longer than a month.
+
+    Two sightings are enough for the long cadences and three for the short
+    ones: a yearly bill only produces a second data point after a year, so
+    demanding three would mean never recognising one.
+    """
+    seq = months_back(month, lookback)
+    rows = conn.execute(
+        f"""SELECT a.merchant_key AS merchant, a.date AS date,
+                   SUM(a.amount_cents) AS amount_cents,
+                   MIN(c.name) AS category, MIN(c.id) AS category_id
+            FROM txn_allocations a JOIN categories c ON c.id = a.category_id
+            JOIN category_groups g ON g.id = c.group_id
+            WHERE g.kind = 'expense' AND c.excluded = 0 AND a.is_transfer = 0
+              AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+            GROUP BY a.txn_id HAVING SUM(a.amount_cents) < 0
+            ORDER BY a.date""", (seq[0], seq[-1])).fetchall()
+
+    grouped: dict[str, list] = {}
+    for r in rows:
+        if r["merchant"]:
+            grouped.setdefault(r["merchant"], []).append(r)
+
+    out: list[PeriodicBill] = []
+    for merchant, charges in grouped.items():
+        # One bill per day: a payment split into two lines is still one bill,
+        # and counting it twice would halve the apparent interval.
+        per_day: dict[date, int] = {}
+        for c in charges:
+            day = date.fromisoformat(c["date"])
+            per_day[day] = per_day.get(day, 0) + -c["amount_cents"]
+        dates = sorted(per_day)
+        if len(dates) < 2:
+            continue
+        gaps = sorted((dates[i + 1] - dates[i]).days for i in range(len(dates) - 1))
+        gap = gaps[len(gaps) // 2]
+        band = next((b for b in CADENCE_BANDS if b[0] <= gap <= b[1]), None)
+        if band is None:
+            continue
+        _, _, label, months_per = band
+        if months_per <= 3 and len(dates) < 3:
+            continue
+        out.append(PeriodicBill(
+            merchant=merchant, category=charges[-1]["category"],
+            category_id=charges[-1]["category_id"], cadence=label,
+            months_per=months_per, typical_cents=_median_int(list(per_day.values())),
+            last_date=dates[-1], next_due=dates[-1] + timedelta(days=gap),
+            times_seen=len(dates)))
+    out.sort(key=lambda b: b.next_due)
+    return out
+
+
+# --- is the budget right? ----------------------------------------------------
+
+REVIEW_MONTHS = 6          # window the "what you usually spend" figure comes from
+MATERIAL_CENTS = 2000      # below this, a gap is not worth telling you about
+TOO_LOW = 1.15             # usual spend this far above budget means the budget is low
+TOO_HIGH = 0.70            # ...and this far below means it is holding money idle
+
+
+@dataclass
+class BudgetNote:
+    """One thing worth knowing about a category's budget this month."""
+    kind: str                  # over | unbudgeted | raise | lower | periodic
+    category: str
+    category_id: int
+    budget: int = 0            # the monthly budget in force, carry-forward included
+    actual: int = 0            # spent this month
+    typical: int = 0           # median month's spend over the window
+    suggested: int = 0         # what the monthly budget would have to be
+    bill: PeriodicBill | None = None
+
+    @property
+    def over_by(self) -> int:
+        return max(0, self.actual - self.budget)
+
+    @property
+    def change(self) -> int:
+        return self.suggested - self.budget
+
+
+def _monthly_spend_by_category(conn, months: list[str]) -> dict[int, dict[str, int]]:
+    rows = conn.execute(
+        """SELECT a.category_id AS cid, substr(a.date,1,7) AS m,
+                  SUM(-a.amount_cents) AS spent
+           FROM txn_allocations a JOIN categories c ON c.id = a.category_id
+           JOIN category_groups g ON g.id = c.group_id
+           WHERE g.kind = 'expense' AND c.excluded = 0 AND a.is_transfer = 0
+             AND substr(a.date,1,7) >= ? AND substr(a.date,1,7) <= ?
+           GROUP BY a.category_id, m""", (months[0], months[-1])).fetchall()
+    out: dict[int, dict[str, int]] = {}
+    for r in rows:
+        out.setdefault(r["cid"], {})[r["m"]] = max(0, r["spent"])
+    return out
+
+
+def budget_review(conn, month: str) -> list[BudgetNote]:
+    """What needs your attention about this month's budget.
+
+    Answers two different questions at once: what has gone over this month,
+    and what the budget itself has wrong — a category you never budgeted but
+    spend on every month, or one whose figure hasn't matched reality in
+    months. Both are "adjust your budget", and neither is visible from a bar
+    that only compares one month to one number.
+
+    Bills that don't arrive monthly are handled separately rather than judged
+    on a month they were never going to fit: a quarterly bill is 200% over in
+    the month it lands and 100% under in the two either side, and reporting
+    that four times a year trains you to ignore the page.
+    """
+    from .budgets import effective_budgets     # circular at module scope
+
+    window = months_back(month, REVIEW_MONTHS)
+    budgets_now, _ = effective_budgets(conn, month)
+    history = _monthly_spend_by_category(conn, window)
+    bills = {b.category_id: b for b in periodic_bills(conn, month)
+             if b.category_id is not None}
+
+    names = {r["id"]: r["name"] for r in conn.execute(
+        "SELECT c.id, c.name FROM categories c "
+        "JOIN category_groups g ON g.id = c.group_id "
+        "WHERE g.kind = 'expense' AND c.excluded = 0 AND c.archived = 0")}
+
+    notes: list[BudgetNote] = []
+    for cat_id, name in names.items():
+        months_seen = history.get(cat_id, {})
+        actual = months_seen.get(month, 0)
+        budget = budgets_now.get(cat_id, 0)
+        if not actual and not budget and not months_seen:
+            continue
+        # The month in progress is not evidence of a typical month yet.
+        past = [months_seen.get(m, 0) for m in window if m != month]
+        typical = _median_int([v for v in past if v > 0]) if any(past) else 0
+
+        bill = bills.get(cat_id)
+        if bill is not None:
+            notes.append(BudgetNote(
+                kind="periodic", category=name, category_id=cat_id, budget=budget,
+                actual=actual, typical=typical, suggested=bill.monthly_cents,
+                bill=bill))
+        elif budget and actual > budget and actual - budget >= MATERIAL_CENTS:
+            notes.append(BudgetNote(
+                kind="over", category=name, category_id=cat_id, budget=budget,
+                actual=actual, typical=typical, suggested=max(typical, actual)))
+        elif not budget and typical >= MATERIAL_CENTS and len(
+                [v for v in past if v > 0]) >= 3:
+            notes.append(BudgetNote(
+                kind="unbudgeted", category=name, category_id=cat_id, actual=actual,
+                typical=typical, suggested=typical))
+        elif budget and typical >= budget * TOO_LOW and typical - budget >= MATERIAL_CENTS:
+            notes.append(BudgetNote(
+                kind="raise", category=name, category_id=cat_id, budget=budget,
+                actual=actual, typical=typical, suggested=typical))
+        elif budget and typical and typical <= budget * TOO_HIGH and \
+                budget - typical >= MATERIAL_CENTS:
+            notes.append(BudgetNote(
+                kind="lower", category=name, category_id=cat_id, budget=budget,
+                actual=actual, typical=typical, suggested=typical))
+
+    order = {"over": 0, "unbudgeted": 1, "raise": 2, "periodic": 3, "lower": 4}
+    notes.sort(key=lambda n: (order[n.kind],
+                              -(n.over_by or n.typical or n.suggested)))
+    return notes

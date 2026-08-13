@@ -19,6 +19,10 @@ def budgets_page(request: Request, conn=Depends(get_conn),
     summary = budgets.month_summary(conn, m, include_empty=True)
     has_budget = any(l.budget for g in summary.groups for l in g.lines)
     prior = budgets.latest_budget_month_before(conn, m)
+    # Keyed by category so each input can say "this one is quarterly" where you
+    # are typing the figure, rather than only on a page you might not open.
+    bills = {b.category_id: b for b in insights.periodic_bills(conn, m)
+             if b.category_id is not None}
     return render(request, conn, "budgets.html",
                   month=m, month_label=budgets.month_label(m),
                   prev_month=budgets.shift_month(m, -1),
@@ -26,6 +30,7 @@ def budgets_page(request: Request, conn=Depends(get_conn),
                   prior_label=budgets.month_label(summary.budget_from)
                   if summary.budget_from else "",
                   summary=summary, has_budget=has_budget, prior_month=prior,
+                  bills=bills,
                   prior_month_label=budgets.month_label(prior) if prior else "",
                   copied=copied,
                   copied_from=clean_month(copied_from) if copied_from else "",

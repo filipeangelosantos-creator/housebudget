@@ -267,6 +267,8 @@ svg [data-drill-kind][aria-expanded="true"] {
 }
 .balance .spread { padding: 2px 0; }
 .balance { margin-top: 0; }
+.bill-hint { color: var(--ink-2); }
+.review-note .amt { white-space: nowrap; }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);

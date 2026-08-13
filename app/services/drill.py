@@ -66,6 +66,23 @@ def income_rows(conn, month: str) -> list[dict]:
                   [month], order="a.amount_cents DESC")
 
 
+def other_rows(conn, month: str, anchor: str) -> list[dict]:
+    """What "Other" on the composition chart is made of, for one month.
+
+    The ranking that decides which categories are rolled up is computed across
+    the whole chart, so it depends on the month the chart is anchored at, not
+    on the bar being opened — `anchor` is that month.
+    """
+    from .insights import composition_others
+    names = composition_others(conn, anchor)
+    if not names:
+        return []
+    holes = ",".join("?" * len(names))
+    return _fetch(conn,
+                  f"substr(a.date,1,7) = ? AND a.amount_cents < 0 "
+                  f"AND c.name IN ({holes}) AND {_COUNTED}", [month] + names)
+
+
 def net_rows(conn, month: str) -> list[dict]:
     """Everything behind one month's surplus or deficit.
 
@@ -94,6 +111,7 @@ KINDS = {
     "category": lambda conn, month, key, day: category_rows(conn, month, key),
     "merchant": lambda conn, month, key, day: merchant_rows(conn, month, key),
     "recurring": lambda conn, month, key, day: recurring_rows(conn, month, key),
+    "other": lambda conn, month, key, day: other_rows(conn, month, key or month),
     "spending": lambda conn, month, key, day: spending_rows(conn, month, day),
     "income": lambda conn, month, key, day: income_rows(conn, month),
     "net": lambda conn, month, key, day: net_rows(conn, month),

@@ -6,6 +6,10 @@
     <strong class="small">{{ amount(rows|sum(attribute='amount_cents')) }}</strong>
   </div>
   {% if period %}
+  {% if kind == 'other' %}
+  <p class="small muted drill-period">Everything outside the biggest categories on
+  that chart, added together — these are the transactions in it.</p>
+  {% endif %}
   {# The link opens the whole month, so it is labelled with the month — not
      with `period`, which may be cut off partway through it. #}
   <p class="small muted drill-period">{{ period }}{% if elsewhere %} — not the month

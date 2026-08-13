@@ -45,10 +45,21 @@ def day_month(d) -> str:
     return f"{d.day} {MONTH_ABBR[d.month - 1]}"
 
 
+def day_month_year(d) -> str:
+    """A date as '31 Jan 2027'.
+
+    For anything that can fall outside the month on screen — when a
+    twice-yearly bill is next due, say — the year is the difference between a
+    date and a guess.
+    """
+    return f"{day_month(d)} {d.year}"
+
+
 templates.env.filters["money"] = money
 templates.env.filters["money_signed"] = money_signed
 templates.env.filters["money_plain"] = money_plain
 templates.env.filters["day_month"] = day_month
+templates.env.filters["day_month_year"] = day_month_year
 
 
 def parse_money_input(text: str) -> int:

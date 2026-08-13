@@ -128,6 +128,14 @@
     <div class="budget-edit-row">
       <div class="nm">{{ line.name }}
         <div class="hint">{{ 'received' if group.kind == 'income' else 'spent' }} {{ plain(line.actual) }} this month</div>
+        {% set bill = bills.get(line.id) %}
+        {% if bill %}
+        {# Budgeting a quarterly bill monthly is wrong in every month, so the
+           figure offered here is the set-aside, not the bill. #}
+        <div class="hint bill-hint">{{ bill.cadence }} · {{ currency }}{{ bill.typical_cents|money }}
+          next due {{ bill.next_due|day_month_year }} — set aside
+          <strong>{{ currency }}{{ bill.monthly_cents|money }}</strong>/month</div>
+        {% endif %}
       </div>
       <input type="text" inputmode="decimal" name="cat_{{ line.id }}"
              data-kind="{{ group.kind }}"

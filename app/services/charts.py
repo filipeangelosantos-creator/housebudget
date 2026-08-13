@@ -205,9 +205,10 @@ def stacked_chart(composition: dict, width: int = 360, height: int = 165) -> str
             if h < 0.7:
                 continue
             top = y_cursor - h
-            # "Other" is a roll-up of everything outside the top categories, so
-            # there is no single category to open it into.
-            drill = ("" if s["name"] == "Other"
+            # "Other" is a roll-up, so it opens as a roll-up: the key is the
+            # month the chart is anchored at, which is what decides the ranking
+            # and therefore which categories fell into it.
+            drill = (_drill("other", month, months[-1]) if s["name"] == "Other"
                      else _drill("category", month, s["name"]))
             parts.append(
                 f'<rect x="{cx - bar_w / 2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" '

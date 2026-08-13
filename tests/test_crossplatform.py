@@ -91,3 +91,10 @@ def test_launchers_exist_for_both_platforms():
     # the Windows launcher must use the venv's own interpreter, not a global one
     assert ".venv\\Scripts\\python.exe" in text
     assert "-m uvicorn app.main:app" in text
+
+
+def test_a_due_date_carries_its_year():
+    """A twice-yearly bill next due "31 Jan" is next January — saying which
+    year is the difference between a date and a guess."""
+    from app.deps import day_month_year
+    assert day_month_year(date(2027, 1, 31)) == "31 Jan 2027"
