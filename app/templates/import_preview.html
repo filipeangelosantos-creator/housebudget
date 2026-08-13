@@ -131,15 +131,31 @@ below and refresh the preview.</div></div>
   {% endif %}
 
   <div class="card">
-    <h2>Preview ({{ sample|length }} of {{ stats.ok }})</h2>
+    <h2>Check what's being imported ({{ rows|length }})</h2>
+    <p class="small muted">Nothing is saved until you confirm. A statement that
+    lists deposits and withdrawals under separate headings keeps the direction in
+    the heading, not in the number — if a whole file came in backwards, flip it;
+    if one row is wrong, fix that row. Untick anything you don't want at all.</p>
+    <label class="check"><input type="checkbox" name="flip_all" value="1"
+      {{ 'checked' if flip_all }} data-autosubmit>
+      <span>Every amount is the wrong way round — flip the lot</span></label>
     <div class="tbl-scroll">
-      <table class="tbl">
-        <tr><th>Date</th><th>Description</th><th class="num">Amount</th></tr>
-        {% for r in sample %}
+      <table class="tbl import-rows">
+        <tr><th>Keep</th><th>Date</th><th>Description</th>
+          <th>In or out</th><th class="num">Amount</th></tr>
+        {% for r in rows %}
         <tr>
+          <td><input type="checkbox" name="keep_{{ loop.index0 }}" checked
+                     aria-label="Import this row"></td>
           <td style="white-space:nowrap">{{ r.date }}</td>
           <td>{{ r.description[:60] }}</td>
-          <td class="num {{ 'pos' if r.amount_cents > 0 }}">{{ amount(r.amount_cents) }}</td>
+          <td><select name="dir_{{ loop.index0 }}" aria-label="Direction">
+            <option value="out"{{ ' selected' if r.amount_cents < 0 }}>out</option>
+            <option value="in"{{ ' selected' if r.amount_cents >= 0 }}>in</option>
+          </select></td>
+          <td class="num"><input type="text" inputmode="decimal"
+                 name="amt_{{ loop.index0 }}" aria-label="Amount"
+                 value="{{ (r.amount_cents or 0)|abs|money_plain }}"></td>
         </tr>
         {% endfor %}
       </table>

@@ -6,6 +6,7 @@ from fastapi.responses import RedirectResponse
 from .. import config
 from ..db import utcnow
 from ..deps import current_user, get_conn, render, verify_csrf
+from ..parsing.amounts import parse_amount
 from ..parsing.csv_parser import Mapping, apply_mapping
 from ..parsing.statements import SUPPORTED_EXTENSIONS, load_statement
 from ..services import importer, review, splits, transfers
@@ -60,11 +61,50 @@ def _column_options(stmt) -> list[dict]:
     return options
 
 
+def _flip_all(stmt, on: bool) -> None:
+    """Turn every amount in the file around.
+
+    A statement that lists deposits and withdrawals under separate headings
+    carries the direction in the heading rather than in the number. Miss the
+    heading and every row comes in backwards — one switch, not thirty edits.
+    """
+    if not on:
+        return
+    for r in stmt.parsed:
+        if r.amount_cents is not None:
+            r.amount_cents = -r.amount_cents
+
+
+def _apply_row_overrides(form, stmt) -> None:
+    """Replace what was read with what you confirmed, row by row.
+
+    Nothing here argues with the file: the amount and its direction are
+    whatever the person looking at both the statement and the screen says they
+    are, and a row can be dropped outright.
+    """
+    ok = [r for r in stmt.parsed if not r.error]
+    if not any(str(k).startswith("keep_") for k in form.keys()):
+        return                                   # preview never offered them
+    dropped = []
+    for i, row in enumerate(ok):
+        if form.get(f"keep_{i}") is None:
+            dropped.append(row)
+            continue
+        cents = parse_amount(str(form.get(f"amt_{i}", "")))
+        if cents is not None:
+            size = abs(cents)
+            row.amount_cents = -size if form.get(f"dir_{i}") == "out" else size
+    if dropped:
+        stmt.parsed = [r for r in stmt.parsed if r not in dropped]
+
+
 def _render_preview(request, conn, token: str, filename: str, account_id: int,
                     stmt, saved_profile: bool, batch: str = "",
-                    batch_pos: int = 0, batch_total: int = 0):
+                    batch_pos: int = 0, batch_total: int = 0,
+                    flip_all: bool = False):
     stats = importer.preview_stats(conn, account_id, stmt.parsed)
     sample = [r for r in stmt.parsed if not r.error][:12]
+    rows = [r for r in stmt.parsed if not r.error]
     errors = [r for r in stmt.parsed if r.error][:5]
     account = conn.execute("SELECT * FROM accounts WHERE id = ?",
                            (account_id,)).fetchone()
@@ -80,7 +120,7 @@ def _render_preview(request, conn, token: str, filename: str, account_id: int,
                   kind=stmt.kind, mapping=stmt.mapping,
                   columns=_column_options(stmt), stats=stats, sample=sample,
                   errors=errors, saved_profile=saved_profile,
-                  suggest_flip=suggest_flip,
+                  suggest_flip=suggest_flip, rows=rows, flip_all=flip_all,
                   is_pdf=filename.lower().endswith(".pdf"),
                   batch=batch, batch_pos=batch_pos, batch_total=batch_total)
 
@@ -256,12 +296,15 @@ async def import_commit(request: Request, conn=Depends(get_conn),
         stmt.parsed = apply_mapping(stmt.rows, mapping)
 
     state = importer.load_batch(batch) if batch else None
+    flip_all = str(form.get("flip_all", "")) == "1"
+    _flip_all(stmt, flip_all)
 
     if form.get("action") == "refresh":
         return _render_preview(request, conn, token, filename, account_id, stmt,
                                saved_profile=False, batch=batch,
                                batch_pos=(state["index"] + 1) if state else 0,
-                               batch_total=len(state["tokens"]) if state else 0)
+                               batch_total=len(state["tokens"]) if state else 0,
+                               flip_all=flip_all)
 
     if form.get("action") == "skip" and state is not None:
         state["skipped"].append({"filename": filename, "reason": "skipped by you"})
@@ -270,6 +313,7 @@ async def import_commit(request: Request, conn=Depends(get_conn),
         importer.drop_pending(token)
         return _preview_batch_item(request, conn, batch)
 
+    _apply_row_overrides(form, stmt)
     result = importer.commit_import(conn, account_id, filename, data, stmt.parsed,
                                     user["id"])
     if stmt.kind == "table":

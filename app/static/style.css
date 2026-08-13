@@ -470,3 +470,9 @@ button.linklike { background: none; border: none; color: var(--accent);
 details.adv { margin: 10px 0; }
 details.adv summary { cursor: pointer; color: var(--accent); font-size: 14px; }
 .footer-note { text-align: center; color: var(--muted); font-size: 12px; margin-top: 24px; }
+
+/* --- confirming an import row by row ------------------------------------- */
+.import-rows input[type=text] { width: 6.5em; padding: 4px 6px; font-size: 14px;
+                                text-align: right; }
+.import-rows select { width: auto; padding: 4px 6px; font-size: 14px; }
+.import-rows td { vertical-align: middle; }
