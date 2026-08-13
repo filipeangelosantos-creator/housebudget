@@ -141,11 +141,19 @@
     var pageMonth = pageMonthEl ? pageMonthEl.getAttribute("data-month") : "";
     var openDrills = [];       // {anchor, host, node}
 
-    // Where the panel goes. A bar lives inside an <svg>, which can't hold
-    // HTML, so its panel goes after the whole chart — which means every bar in
-    // one chart shares an anchor, and opening one has to close the last.
+    // Where the panel goes. Anything belonging to a chart opens at the foot of
+    // its card: spliced in beside the thing you clicked it pushes the chart
+    // apart, and on a row of sparklines it lands in the middle of the list. One
+    // place per card, under everything — which also means opening a second bar
+    // replaces the first rather than stacking.
+    // Plain lists keep the panel against the row it came from, where reading
+    // straight down still works.
     var anchorFor = function (host) {
-      return host.ownerSVGElement || host;
+      var card = host.closest && host.closest(".chart-card");
+      return card || host.ownerSVGElement || host;
+    };
+    var isCard = function (el) {
+      return el.classList && el.classList.contains("chart-card");
     };
     var closeAt = function (anchor) {
       openDrills = openDrills.filter(function (p) {
@@ -174,6 +182,10 @@
       var open = function (e) {
         if (e.target.closest && e.target.closest("a")) return;   // links navigate
         e.preventDefault();
+        // A sparkline bar sits inside a row that is itself drillable. Without
+        // this the click reaches both, and the row — firing second — replaces
+        // the bar's month with the row's, so May opened August.
+        e.stopPropagation();
         var anchor = anchorFor(host);
         var wasOpen = host.getAttribute("aria-expanded") === "true";
         closeAt(anchor);
@@ -181,7 +193,12 @@
         var made = makePanel(anchor);
         var panel = made.target;
         panel.innerHTML = '<p class="small muted drill-inner">Loading…</p>';
-        anchor.insertAdjacentElement("afterend", made.node);
+        if (isCard(anchor)) {
+          made.node.className = "drill at-foot";
+          anchor.appendChild(made.node);
+        } else {
+          anchor.insertAdjacentElement("afterend", made.node);
+        }
         host.setAttribute("aria-expanded", "true");
         openDrills.push({ anchor: anchor, host: host, node: made.node });
         var url = "/insights/drill?kind=" +
@@ -192,7 +209,13 @@
           "&page_month=" + encodeURIComponent(pageMonth);
         fetch(url)
           .then(function (r) { return r.text(); })
-          .then(function (html) { panel.innerHTML = html; })
+          .then(function (html) {
+            panel.innerHTML = html;
+            // At the foot of a tall chart it can open below the fold, so bring
+            // it into view — "nearest" leaves the page alone if it is already
+            // visible rather than jumping on every tap.
+            made.node.scrollIntoView({ block: "nearest" });
+          })
           .catch(function () {
             panel.innerHTML = '<p class="small muted drill-inner">' +
               "Couldn't load those transactions.</p>";
@@ -203,6 +226,27 @@
       host.addEventListener("keydown", function (e) {
         if (e.key === "Enter" || e.key === " ") open(e);
       });
+    });
+
+    // Closing one. Tapping the row again works, but once the panel opens at the
+    // foot of a chart that row can be a long way from what you are reading.
+    var closeNode = function (node) {
+      openDrills = openDrills.filter(function (p) {
+        if (p.node !== node) return true;
+        p.node.remove();
+        p.host.setAttribute("aria-expanded", "false");
+        if (p.host.focus) p.host.focus();      // back to what opened it
+        return false;
+      });
+    };
+    document.addEventListener("click", function (e) {
+      var btn = e.target.closest(".drill-close");
+      if (btn) closeNode(btn.closest(".drill"));
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && openDrills.length) {
+        openDrills.slice().forEach(function (p) { closeNode(p.node); });
+      }
     });
 
     // Re-filing from inside a panel. The select is moved into the row being

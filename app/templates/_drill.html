@@ -3,7 +3,10 @@
 <div class="drill-inner" data-csrf="{{ csrf }}">
   <div class="spread">
     <span class="small muted">{{ rows|length }}{{ '+' if truncated }} transaction{{ 's' if rows|length != 1 }}{% if title %} · {{ title }}{% endif %}</span>
-    <strong class="small">{{ amount(rows|sum(attribute='amount_cents')) }}</strong>
+    <span class="drill-head">
+      <strong class="small">{{ amount(rows|sum(attribute='amount_cents')) }}</strong>
+      <button type="button" class="drill-close" aria-label="Close">×</button>
+    </span>
   </div>
   {% if period %}
   {% if kind == 'other' %}
@@ -44,6 +47,13 @@
   {% endif %}
 </div>
 {% else %}
-<div class="drill-inner"><p class="small muted">Nothing to show
-  {% if period %}in {{ period }}{% else %}here{% endif %}.</p></div>
+<div class="drill-inner">
+  <div class="spread">
+    <span class="small muted">Nothing to show
+      {%- if period %} in {{ period }}{% endif %}.</span>
+    <span class="drill-head">
+      <button type="button" class="drill-close" aria-label="Close">×</button>
+    </span>
+  </div>
+</div>
 {% endif %}

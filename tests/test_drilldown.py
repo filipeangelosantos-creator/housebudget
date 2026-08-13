@@ -577,3 +577,19 @@ def test_the_legend_entry_for_other_opens_it_as_well(signed_in):
 
     r = signed_in.get("/insights?month=2026-08")
     assert 'data-drill-kind="other"' in r.text
+
+
+def test_every_panel_offers_a_way_to_close_itself(signed_in):
+    """It opens at the foot of the chart card, which can be a long way from the
+    bar that opened it — so closing can't only mean finding that bar again."""
+    conn = open_db()
+    add_txn(conn, 1, "2026-08-02", -3000, "MARKET", category(conn, "Groceries"))
+    conn.close()
+
+    full = signed_in.get("/insights/drill?kind=category&key=Groceries&month=2026-08")
+    assert 'class="drill-close"' in full.text
+    assert 'aria-label="Close"' in full.text
+
+    empty = signed_in.get("/insights/drill?kind=category&key=Pets&month=2026-08")
+    assert "Nothing to show" in empty.text
+    assert 'class="drill-close"' in empty.text     # including the empty one
