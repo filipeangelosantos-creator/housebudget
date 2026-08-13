@@ -441,6 +441,43 @@ def dated_with_posting_asterisk() -> bytes:
     return buf.getvalue()
 
 
+def card_month_day_only(period: str, rows: list[tuple[str, str, str]],
+                        totals_year: str = "2026") -> bytes:
+    """Chase-shaped: rows are MM/DD with no year at all, so the year has to
+    come from the statement period. `totals_year` mimics the year-to-date
+    footer, which is the only 4-digit year on the page and is not always the
+    year the rows belong to.
+
+    `period` is like "12/12/25 - 01/11/26".
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, H - 55, "CHASE FREEDOM")
+    c.setFont("Helvetica", 9)
+    c.drawString(50, H - 72, f"Opening/Closing Date {period}")
+
+    y = H - 105
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Date of Transaction")
+    c.drawString(160, y, "Merchant Name or Transaction Description")
+    _draw_right(c, 545, y, "$ Amount")
+    y -= 18
+    c.setFont("Helvetica", 9)
+    for date, desc, amount in rows:
+        c.drawString(50, y, date)
+        c.drawString(160, y, desc)
+        _draw_right(c, 545, y, amount)
+        y -= 14
+
+    c.setFont("Helvetica", 8)
+    c.drawString(50, 90, f"{totals_year} Totals Year-to-Date")
+    c.drawString(50, 78, f"Total fees charged in {totals_year} $0.00")
+    c.drawString(50, 66, f"Total interest charged in {totals_year} $0.00")
+    c.save()
+    return buf.getvalue()
+
+
 def scanned_like_no_text() -> bytes:
     """A page with no extractable text, standing in for a scanned statement."""
     buf = io.BytesIO()

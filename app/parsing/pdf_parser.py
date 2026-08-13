@@ -18,8 +18,11 @@ still confirm the columns before anything is imported.
 """
 import re
 from collections import Counter
+from datetime import date
 
 import pdfplumber
+
+from .amounts import parse_date
 
 # Money on a statement effectively always carries two decimal places. Requiring
 # them is what stops "REF 12345" or an IBAN block being read as an amount.
@@ -210,6 +213,85 @@ def _document_year(pages_text: str) -> str | None:
     return full.most_common(1)[0][0]
 
 
+# "Opening/Closing Date 04/12/26 - 05/11/26", "StatementPeriod05/17/26-06/16/26",
+# "STATEMENT PERIOD 12/19/25 TO 01/16/26", "through March 11, 2026",
+# "Statement Date: 05/11/26". Spacing is optional throughout: these PDFs often
+# contain no space characters at all.
+_PERIOD_RANGE = re.compile(
+    r"(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})\s*(?:-|–|—|to|through)\s*"
+    r"(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4})", re.IGNORECASE)
+_PERIOD_TEXT_END = re.compile(
+    r"(?:through|to|-)\s*([A-Z][a-z]{2,9}\.?\s*\d{1,2},?\s*(?:19|20)\d{2})")
+_STATEMENT_DATE = re.compile(
+    r"statement\s*(?:date|closing\s*date|ending)\s*:?\s*"
+    r"(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{1,2}\s*[A-Z][a-z]{2,9}\s*(?:19|20)\d{2}|"
+    r"[A-Z][a-z]{2,9}\s*\d{1,2},?\s*(?:19|20)\d{2})", re.IGNORECASE)
+
+
+# The loose "through <date>" form also appears in offer terms ("Lounge access
+# through September 30, 2027"), so it only counts next to a period label.
+_PERIOD_LABEL = re.compile(
+    r"(statement|billing|period|beginning|cycle|from)\b[^.]{0,60}$", re.IGNORECASE)
+
+
+def statement_period_end(text: str) -> date | None:
+    """The last day the statement covers, used to date rows that omit a year.
+
+    Tried most reliable first: an explicit date range, then a labelled
+    statement date, then prose — and prose only where a period label precedes
+    it, so promotional small print cannot masquerade as the statement period.
+    """
+    ranges: list[date] = []
+    for match in _PERIOD_RANGE.finditer(text):
+        start, end = parse_date(match.group(1)), parse_date(match.group(2))
+        # A real period is a forward span of at most a year or so.
+        if start and end and start < end and (end - start).days <= 400:
+            ranges.append(end)
+    if ranges:
+        return max(ranges)
+
+    labelled = [d for d in (parse_date(m.group(1))
+                            for m in _STATEMENT_DATE.finditer(text)) if d]
+    if labelled:
+        return max(labelled)
+
+    prose: list[date] = []
+    for match in _PERIOD_TEXT_END.finditer(text):
+        before = text[max(0, match.start() - 70):match.start()].replace("\n", " ")
+        if not _PERIOD_LABEL.search(before):
+            continue
+        parsed = parse_date(match.group(1))
+        if parsed:
+            prose.append(parsed)
+    return max(prose) if prose else None
+
+
+_MONTH_DAY = re.compile(r"^(\d{1,2})[-/.](\d{1,2})$")
+
+
+def _year_for(date_text: str, period_end: date | None, fallback: str | None) -> str | None:
+    """Which year a bare MM/DD belongs to.
+
+    A statement ending 01/16/26 lists rows from both December and January;
+    stamping every row with the document's most common year puts the December
+    ones eleven months in the future — and makes two different statements
+    collide as duplicates.
+    """
+    match = _MONTH_DAY.match(date_text.strip())
+    if period_end is None or not match:
+        return fallback
+    month, day = int(match.group(1)), int(match.group(2))
+    try:
+        same_year = date(period_end.year, month, day)
+    except ValueError:
+        return str(period_end.year)
+    # Rows can post a couple of days after the closing date; anything further
+    # ahead belongs to the previous year.
+    if (same_year - period_end).days > 5:
+        return str(period_end.year - 1)
+    return str(period_end.year)
+
+
 def _header_line(lines: list[list[dict]], above_top: float) -> list[dict] | None:
     """The line naming the columns of the transaction table.
 
@@ -287,7 +369,9 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     columns = _cluster(money_edges, COLUMN_TOLERANCE)
     n_dates = min(MAX_DATE_COLUMNS, max(len(p[1]) for p in parsed))
     has_reference = any(p[2] for p in parsed)
-    year = _document_year(" ".join(all_text))
+    document_text = " ".join(all_text)
+    year = _document_year(document_text)
+    period_end = statement_period_end(document_text)
 
     # A document whose amounts carry no signs at all (no leading minus, no
     # parentheses, no (-) marker) encodes direction structurally — via its
@@ -322,8 +406,11 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
             if dates:
                 date_cells = [_clean_token(d) for d in dates[:n_dates]]
                 date_cells += [""] * (n_dates - len(date_cells))
-                if year and date_cells[0] and not _has_year(date_cells[0]):
-                    date_cells[0] = f"{date_cells[0]} {year}"
+                for i, cell in enumerate(date_cells):
+                    if cell and not _has_year(cell):
+                        resolved = _year_for(cell, period_end, year)
+                        if resolved:
+                            date_cells[i] = f"{cell} {resolved}"
                 last_date_cells = date_cells
             else:
                 # Statements like HSBC's print the date once per day; the rest

@@ -8,7 +8,7 @@ while re-importing an overlapping statement skips existing rows.
 import hashlib
 import json
 import secrets
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .. import config
 from ..db import utcnow
@@ -70,6 +70,38 @@ class PreviewStats:
     would_categorize: int
     date_min: str
     date_max: str
+    duplicate_sources: list[dict] = field(default_factory=list)
+
+
+def duplicate_sources(conn, hashes: list[str | None]) -> list[dict]:
+    """Which earlier import(s) these duplicates came from.
+
+    Without this, "24 already imported" is unfalsifiable: you cannot tell a
+    genuinely repeated statement from a parsing fault that made two different
+    months look identical.
+    """
+    valid = [h for h in hashes if h]
+    if not valid:
+        return []
+    found: dict[object, dict] = {}
+    for i in range(0, len(valid), 500):
+        chunk = valid[i:i + 500]
+        marks = ",".join("?" * len(chunk))
+        rows = conn.execute(
+            f"""SELECT t.import_id, COUNT(*) AS n, MIN(t.date) AS date_min,
+                       MAX(t.date) AS date_max, i.filename, i.created_at
+                FROM transactions t LEFT JOIN imports i ON i.id = t.import_id
+                WHERE t.dedupe_hash IN ({marks})
+                GROUP BY t.import_id""", chunk).fetchall()
+        for r in rows:
+            entry = found.setdefault(r["import_id"], {
+                "filename": r["filename"] or "added manually",
+                "imported_on": (r["created_at"] or "")[:10],
+                "count": 0, "date_min": r["date_min"], "date_max": r["date_max"]})
+            entry["count"] += r["n"]
+            entry["date_min"] = min(entry["date_min"], r["date_min"])
+            entry["date_max"] = max(entry["date_max"], r["date_max"])
+    return sorted(found.values(), key=lambda e: -e["count"])[:4]
 
 
 def preview_stats(conn, account_id: int, rows: list[ParsedRow]) -> PreviewStats:
@@ -77,7 +109,8 @@ def preview_stats(conn, account_id: int, rows: list[ParsedRow]) -> PreviewStats:
     existing = find_existing(conn, hashes)
     rules = classify.load_rules(conn)
     ok = [r for r in rows if not r.error]
-    dup = sum(1 for r, h in zip(rows, hashes) if not r.error and h in existing)
+    dup_hashes = [h for r, h in zip(rows, hashes)
+                  if not r.error and h in existing]
     categorized = 0
     for r in ok:
         norm = classify.normalize_desc(r.description)
@@ -85,9 +118,10 @@ def preview_stats(conn, account_id: int, rows: list[ParsedRow]) -> PreviewStats:
             categorized += 1
     dates = sorted(str(r.date) for r in ok)
     return PreviewStats(
-        total=len(rows), ok=len(ok), failed=len(rows) - len(ok), duplicates=dup,
-        would_categorize=categorized,
-        date_min=dates[0] if dates else "", date_max=dates[-1] if dates else "")
+        total=len(rows), ok=len(ok), failed=len(rows) - len(ok),
+        duplicates=len(dup_hashes), would_categorize=categorized,
+        date_min=dates[0] if dates else "", date_max=dates[-1] if dates else "",
+        duplicate_sources=duplicate_sources(conn, dup_hashes))
 
 
 @dataclass

@@ -201,6 +201,74 @@ def test_printed_signs_are_never_overridden_by_sections():
     assert by["SOME STO"] == 4500                          # stays positive
 
 
+def test_year_comes_from_the_statement_period_not_the_footer():
+    """Rows are MM/DD only. The page's one 4-digit year is a year-to-date
+    footer, which for a statement spanning New Year is the wrong year for
+    half the rows."""
+    pdf = F.card_month_day_only(
+        "12/12/25 - 01/11/26",
+        [("12/15", "GAS STATION 42", "40.00"),
+         ("12/28", "GROCERY RUN", "80.00"),
+         ("01/04", "COFFEE SHOP", "5.00")],
+        totals_year="2026")
+    _, rows = parsed(pdf)
+    assert [r.date for r in rows] == [
+        date(2025, 12, 15), date(2025, 12, 28), date(2026, 1, 4)]
+
+
+def test_two_consecutive_statements_do_not_collide(conn):
+    """The reported bug: a later statement reported every row as already
+    imported. Stamping both months with one year made them identical."""
+    from app.services import importer
+    conn.execute("INSERT INTO accounts (id, name, type, created_at) "
+                 "VALUES (1, 'Chase CC', 'credit', 'now')")
+    conn.execute("INSERT INTO users (id, username, display_name, password_hash, "
+                 "created_at) VALUES (1, 'u', 'u', 'x', 'now')")
+    conn.commit()
+
+    # Same merchants and amounts each month — a standing subscription pattern.
+    lines = [("11", "NETFLIX.COM", "15.99"), ("14", "STOP & SHOP 0049", "32.55"),
+             ("21", "BURGER KING #5100", "21.80")]
+    jan = F.card_month_day_only(
+        "12/12/25 - 01/11/26", [(f"12/{d}", m, a) for d, m, a in lines])
+    feb = F.card_month_day_only(
+        "01/12/26 - 02/11/26", [(f"01/{d}", m, a) for d, m, a in lines])
+
+    first = importer.commit_import(conn, 1, "Statements-1.pdf", jan,
+                                   load_statement("a.pdf", jan).parsed, 1)
+    second = importer.commit_import(conn, 1, "Statements-2.pdf", feb,
+                                    load_statement("b.pdf", feb).parsed, 1)
+    assert first.added == 3
+    assert second.added == 3 and second.duplicates == 0
+
+    months = {r["m"] for r in conn.execute(
+        "SELECT DISTINCT substr(date,1,7) AS m FROM transactions").fetchall()}
+    assert months == {"2025-12", "2026-01"}
+
+
+def test_preview_says_where_duplicates_came_from(conn):
+    """'24 already imported' has to be checkable, or a parsing fault is
+    indistinguishable from a genuinely repeated statement."""
+    from app.services import importer
+    conn.execute("INSERT INTO accounts (id, name, type, created_at) "
+                 "VALUES (1, 'Chase CC', 'credit', 'now')")
+    conn.execute("INSERT INTO users (id, username, display_name, password_hash, "
+                 "created_at) VALUES (1, 'u', 'u', 'x', 'now')")
+    conn.commit()
+    pdf = F.card_month_day_only("01/12/26 - 02/11/26",
+                                [("01/14", "STOP & SHOP 0049", "32.55")])
+    importer.commit_import(conn, 1, "Statements-3.pdf", pdf,
+                           load_statement("a.pdf", pdf).parsed, 1)
+
+    stats = importer.preview_stats(conn, 1, load_statement("a.pdf", pdf).parsed)
+    assert stats.duplicates == 1
+    assert len(stats.duplicate_sources) == 1
+    source = stats.duplicate_sources[0]
+    assert source["filename"] == "Statements-3.pdf"
+    assert source["count"] == 1
+    assert source["date_min"] == "2026-01-14"
+
+
 def test_scanned_pdf_gives_an_actionable_message():
     with pytest.raises(ValueError, match="scan or photo"):
         load_statement("scan.pdf", F.scanned_like_no_text())

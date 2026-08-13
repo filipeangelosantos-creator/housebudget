@@ -35,6 +35,26 @@ below and refresh the preview.</div></div>
     <tr><td>Auto-categorized</td><td class="num">{{ stats.would_categorize }} of {{ stats.ok }}</td></tr>
     {% if stats.date_min %}<tr><td>Date range</td><td class="num">{{ stats.date_min }} → {{ stats.date_max }}</td></tr>{% endif %}
   </table>
+
+  {% if stats.duplicate_sources %}
+  <p class="small muted" style="margin:10px 0 2px">
+    {% if stats.duplicates == stats.ok %}Every row here matches something already
+    imported into this account:{% else %}The skipped rows match:{% endif %}</p>
+  <table class="tbl">
+    {% for src in stats.duplicate_sources %}
+    <tr>
+      <td>{{ src.filename }}<div class="small muted">imported {{ src.imported_on }}
+        · covers {{ src.date_min }} → {{ src.date_max }}</div></td>
+      <td class="num">{{ src.count }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if stats.duplicates == stats.ok and stats.ok > 0 %}
+  <p class="small muted">If that is a different month, the dates here were read
+  wrong — check the date column below. If it is the same statement under another
+  filename, skip it.</p>
+  {% endif %}
+  {% endif %}
 </div>
 
 <form method="post" action="/import/commit">
