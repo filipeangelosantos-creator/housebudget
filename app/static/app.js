@@ -86,6 +86,65 @@
     refresh();
   }
 
+  // Insights: open any figure into the transactions behind it. Every number
+  // there is an aggregate, and one you can't open is a claim you have to take
+  // on trust. One tap, not two — a double-click has no reliable touch
+  // equivalent, and these are read on a phone.
+  var drillables = document.querySelectorAll("[data-drill-kind]");
+  if (drillables.length) {
+    var closeDrill = function (host) {
+      var panel = host.nextElementSibling;
+      if (panel && panel.classList.contains("drill")) panel.remove();
+      host.setAttribute("aria-expanded", "false");
+    };
+    var makePanel = function (host) {
+      // A <div> after a <tr> gets hoisted out of the table by the parser, so a
+      // row in a table needs a row of its own.
+      if (host.tagName === "TR") {
+        var tr = document.createElement("tr");
+        tr.className = "drill";
+        var td = document.createElement("td");
+        td.colSpan = host.children.length || 2;
+        tr.appendChild(td);
+        return { node: tr, target: td };
+      }
+      var div = document.createElement("div");
+      div.className = "drill";
+      return { node: div, target: div };
+    };
+    drillables.forEach(function (host) {
+      var open = function (e) {
+        if (e.target.closest("a")) return;          // links inside still navigate
+        e.preventDefault();
+        if (host.getAttribute("aria-expanded") === "true") {
+          closeDrill(host);
+          return;
+        }
+        var made = makePanel(host);
+        var panel = made.target;
+        panel.innerHTML = '<p class="small muted drill-inner">Loading…</p>';
+        host.insertAdjacentElement("afterend", made.node);
+        host.setAttribute("aria-expanded", "true");
+        var url = "/insights/drill?kind=" +
+          encodeURIComponent(host.getAttribute("data-drill-kind")) +
+          "&key=" + encodeURIComponent(host.getAttribute("data-drill-key") || "") +
+          "&month=" + encodeURIComponent(host.getAttribute("data-drill-month") || "");
+        fetch(url)
+          .then(function (r) { return r.text(); })
+          .then(function (html) { panel.innerHTML = html; })
+          .catch(function () {
+            panel.innerHTML = '<p class="small muted drill-inner">' +
+              "Couldn't load those transactions.</p>";
+          });
+      };
+      host.addEventListener("click", open);
+      // role="button" on a div gets no free keyboard activation.
+      host.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" || e.key === " ") open(e);
+      });
+    });
+  }
+
   // Classification audit: only the merchants you actually changed get saved,
   // so say how many that is rather than implying the whole page is rewritten.
   var classifyForm = document.getElementById("classify-form");

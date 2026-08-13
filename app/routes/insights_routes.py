@@ -2,7 +2,7 @@
 from fastapi import APIRouter, Depends, Request
 
 from ..deps import current_user, get_conn, render
-from ..services import budgets, insights, transfers
+from ..services import budgets, drill, insights, transfers
 from ..services.charts import (cashflow_chart, net_bars_chart, pace_chart,
                                spark_bars, stacked_chart)
 from .dashboard import clean_month
@@ -46,3 +46,21 @@ def insights_page(request: Request, conn=Depends(get_conn),
                   months_with_data=months_with_data,
                   is_current_month=is_current_month,
                   summary=summary)
+
+
+@router.get("/insights/drill")
+def insights_drill(request: Request, conn=Depends(get_conn),
+                   user=Depends(current_user), kind: str = "", key: str = "",
+                   month: str | None = None):
+    """The transactions behind one figure, as a fragment the page splices in.
+
+    HTML rather than JSON so the rows are rendered by the same template the
+    rest of the app uses, and so a link out to Activity comes for free.
+    """
+    m = clean_month(month)
+    rows = drill.rows_for(conn, kind, m, key)
+    return render(request, conn, "_drill.html",
+                  rows=rows, truncated=len(rows) >= drill.LIMIT,
+                  title=key if kind in ("category", "merchant", "recurring") else "",
+                  more_link=drill.list_link(kind, m, key),
+                  back=f"/insights?month={m}")

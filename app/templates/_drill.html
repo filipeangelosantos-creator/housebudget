@@ -1,0 +1,27 @@
+{% from "_macros.html" import amount with context %}
+{% if rows %}
+<div class="drill-inner">
+  <div class="spread">
+    <span class="small muted">{{ rows|length }}{{ '+' if truncated }} transaction{{ 's' if rows|length != 1 }}{% if title %} · {{ title }}{% endif %}</span>
+    <strong class="small">{{ amount(rows|sum(attribute='amount_cents')) }}</strong>
+  </div>
+  <table class="tbl drill-tbl">
+    {% for r in rows %}
+    <tr>
+      <td class="drill-date">{{ r.date[5:] }}</td>
+      <td><a href="/transactions/{{ r.txn_id }}?back={{ back|urlencode }}">{{ r.description|truncate(46) }}</a>
+        <div class="muted small">{{ r.account_name }}{% if r.category %} · {{ r.category }}{% endif %}{% if r.is_split %} · <span class="chip">part of a split</span>{% endif %}</div></td>
+      <td class="num {{ 'pos' if r.amount_cents > 0 }}">{{ amount(r.amount_cents) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% if truncated %}
+  <p class="small muted">Showing the largest {{ rows|length }}.
+    <a href="{{ more_link }}">See all in Activity</a></p>
+  {% else %}
+  <p class="small muted"><a href="{{ more_link }}">Open in Activity</a></p>
+  {% endif %}
+</div>
+{% else %}
+<div class="drill-inner"><p class="small muted">Nothing to show here.</p></div>
+{% endif %}

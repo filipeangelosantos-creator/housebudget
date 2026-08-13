@@ -15,7 +15,8 @@ def transfers_page(request: Request, conn=Depends(get_conn),
                   suggestions=transfers.suggestions(conn),
                   group_sizes=transfers.group_sizes(conn),
                   linked=transfers.linked_pairs(conn),
-                  linked_count=transfers.linked_count(conn))
+                  linked_count=transfers.linked_count(conn),
+                  unmatched=transfers.all_unmatched(conn))
 
 
 @router.get("/transfers/manual")

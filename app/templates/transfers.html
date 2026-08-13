@@ -93,6 +93,27 @@ are matched, the pair is kept out of budgets and insights automatically.</p>
 {% endfor %}
 {% endif %}
 
+{% if unmatched %}
+<div class="card" style="border-left:4px solid var(--warning)">
+  <h2 id="unmatched">Missing the other side ({{ unmatched|length }})</h2>
+  <p class="small muted" style="margin-top:-4px">Filed as a transfer or a card
+  payment, but nothing was found coming the other way. If it paid a credit card,
+  that card's statement is probably not imported — and none of its spending is
+  being counted.</p>
+  {% for t in unmatched %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc"><a href="/transactions/{{ t.id }}?back=/transfers">{{ t.description }}</a></div>
+      <div class="meta">{{ t.date }} · {{ t.account_name }} · {{ t.category }}</div>
+    </div>
+    <div class="amt {{ 'pos' if t.amount_cents > 0 }}">{{ amount(t.amount_cents) }}</div>
+    <a class="btn small ghost" href="/transfers/manual?side={{ t.id }}"
+       style="flex-shrink:0">Pair</a>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
 {% if linked %}
 <div class="card">
   <h2>Matched pairs</h2>

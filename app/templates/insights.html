@@ -10,20 +10,23 @@
 </div>
 
 {% for a in alerts %}
-<div class="banner bad">
+<div class="banner bad" data-drill-kind="category" data-drill-key="{{ a.category }}"
+     data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
   <div class="grow">⚠️ <strong>{{ a.category }}</strong> is {{ a.pct_change }}% above its usual
   {{ currency }}{{ a.average|money }} — {{ currency }}{{ a.current|money }} so far this month.</div>
 </div>
 {% endfor %}
 
 {% if unmatched %}
-<div class="banner warn">
+<div class="banner warn" data-drill-kind="unmatched" data-drill-month="{{ month }}"
+     role="button" tabindex="0" aria-expanded="false">
   <div class="grow"><strong>{{ unmatched|length }} transfer{{ 's' if unmatched|length != 1 }}</strong>
   with no matching other side ({{ currency }}{{ (unmatched|sum(attribute='amount_cents'))|abs|money }}).
   If that's a card payment, the card's own statement may be missing — its spending
   wouldn't be counted anywhere.</div>
-  <a class="btn small" href="/transfers">Check</a>
 </div>
+<p class="small muted" style="margin-top:-6px">Tap to see which ones, or
+  <a href="/transfers/manual">pair them by hand</a>.</p>
 {% endif %}
 
 {# --- Spending pace: the most actionable mid-month view --- #}
@@ -36,7 +39,9 @@
   </div>
   {{ pace_svg|safe }}
   <table class="tbl" style="margin-top:8px">
-    <tr><td>Spent by day {{ pace.elapsed }}</td>
+    <tr data-drill-kind="spending" data-drill-month="{{ month }}"
+        role="button" tabindex="0" aria-expanded="false">
+      <td>Spent by day {{ pace.elapsed }}</td>
       <td class="num"><strong>{{ currency }}{{ pace.spent|money }}</strong></td></tr>
     <tr><td>Same point last month</td>
       <td class="num">{{ currency }}{{ pace.prev_same_day|money }}
@@ -87,7 +92,9 @@
   {{ stacked_svg|safe }}
   <div class="legend-grid">
     {% for s in composition.series %}
-    <span class="legend-item">
+    <span class="legend-item"{% if s.name != 'Other' %} data-drill-kind="category"
+          data-drill-key="{{ s.name }}" data-drill-month="{{ month }}"
+          role="button" tabindex="0" aria-expanded="false"{% endif %}>
       <span class="sw s{{ loop.index0 % 7 + 1 }}"></span>
       <span class="legend-name">{{ s.name }}</span>
       <span class="muted legend-val">{{ currency }}{{ s.monthly[-1]|money }}</span>
@@ -104,7 +111,8 @@
 <div class="card">
   <h2>Biggest changes vs 3-month average</h2>
   {% for m in movers %}
-  <div class="txn">
+  <div class="txn" data-drill-kind="category" data-drill-key="{{ m.category }}"
+       data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
     <div class="mid">
       <div class="desc">{{ m.category }}</div>
       <div class="meta">usually {{ currency }}{{ m.average|money }}</div>
@@ -135,7 +143,8 @@
 <div class="card chart-card">
   <h2>Category trends — last 6 months</h2>
   {% for t in trends %}
-  <div class="trend-row">
+  <div class="trend-row" data-drill-kind="category" data-drill-key="{{ t.name }}"
+       data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
     <span class="name">{{ t.name }}</span>
     {{ t.svg|safe }}
     <span class="tot">{{ currency }}{{ t.series[-1]|money }}</span>
@@ -149,7 +158,8 @@
 <div class="card">
   <h2>Recurring &amp; subscriptions</h2>
   {% for r in recurring %}
-  <div class="txn">
+  <div class="txn" data-drill-kind="recurring" data-drill-key="{{ r.merchant }}"
+       data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
     <div class="mid">
       <div class="desc">{{ r.merchant.title() }}</div>
       <div class="meta">{{ r.category or 'uncategorized' }} · seen {{ r.months_seen }} months · last {{ r.last_date }}</div>
@@ -166,7 +176,8 @@
 <div class="card">
   <h2>Top merchants this month</h2>
   {% for m in merchants %}
-  <div class="txn">
+  <div class="txn" data-drill-kind="merchant" data-drill-key="{{ m.merchant }}"
+       data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
     <div class="mid"><div class="desc">{{ m.merchant.title() }}</div>
       <div class="meta">{{ m.n }} transaction{{ 's' if m.n != 1 }}</div></div>
     <div class="amt">{{ currency }}{{ m.spent|money }}</div>

@@ -66,6 +66,21 @@ def effective_budgets(conn, month: str) -> tuple[dict[int, int], str | None]:
     return {}, None
 
 
+def expense_budget_total(conn, month: str) -> int:
+    """Everything budgeted for spending this month, carry-forward included.
+
+    Reading the budgets table directly here is a trap: a month that inherits
+    its budget has no rows of its own, and the figure silently comes out zero.
+    """
+    amounts, _ = effective_budgets(conn, month)
+    if not amounts:
+        return 0
+    counted = {r["id"] for r in conn.execute(
+        "SELECT c.id FROM categories c JOIN category_groups g ON g.id = c.group_id "
+        "WHERE g.kind = 'expense' AND c.excluded = 0")}
+    return sum(cents for cat_id, cents in amounts.items() if cat_id in counted)
+
+
 def actuals_by_category(conn, month: str) -> dict[int | None, int]:
     """Signed sums per category for the month (uncategorized under None).
 

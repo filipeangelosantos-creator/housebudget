@@ -208,6 +208,25 @@ a { color: var(--accent); }
 .dupe-group { border-top: 1px solid var(--border); padding: 8px 0 4px; }
 .dupe-row { padding: 3px 0; gap: 10px; }
 
+/* --- insights drill-down ------------------------------------------------- */
+[data-drill-kind] { cursor: pointer; }
+[data-drill-kind]::after {
+  content: "›"; float: right; color: var(--muted); font-size: 15px;
+  transition: transform .12s ease; display: inline-block;
+}
+[data-drill-kind][aria-expanded="true"]::after { transform: rotate(90deg); }
+[data-drill-kind]:hover { background: var(--track); }
+.drill { margin: -2px 0 8px; }
+.legend-grid > .drill { grid-column: 1 / -1; }
+tr.drill td { padding: 0 0 8px; }
+.drill-inner { border: 1px solid var(--border); border-left: 3px solid var(--accent);
+               border-radius: 10px; padding: 8px 10px; background: var(--surface); }
+.drill-tbl td { font-size: 13px; padding: 4px 6px 4px 0; vertical-align: top; }
+.drill-tbl .drill-date { color: var(--muted); white-space: nowrap;
+                         font-variant-numeric: tabular-nums; }
+.drill-tbl .num { text-align: right; white-space: nowrap;
+                  font-variant-numeric: tabular-nums; }
+
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);
           margin: 10px 0 4px; }

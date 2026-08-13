@@ -304,6 +304,26 @@ def linked_count(conn) -> int:
     return conn.execute("SELECT COUNT(*) FROM transfer_links").fetchone()[0]
 
 
+def all_unmatched(conn, limit: int = 50) -> list[dict]:
+    """Every filed transfer or card payment whose other side never arrived.
+
+    The insights page counts these; this is what you land on when you go to do
+    something about them, so it must not be scoped to one month.
+    """
+    rows = conn.execute(
+        """SELECT t.id, t.date, t.description, t.amount_cents, c.name AS category,
+                  a.name AS account_name
+           FROM transactions t
+           JOIN categories c ON c.id = t.category_id
+           JOIN accounts a ON a.id = t.account_id
+           WHERE c.excluded = 1
+             AND NOT EXISTS (SELECT 1 FROM transfer_links l
+                             WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)
+           ORDER BY t.date DESC, ABS(t.amount_cents) DESC LIMIT ?""",
+        (limit,)).fetchall()
+    return [dict(r) for r in rows]
+
+
 def unmatched_transfers(conn, month: str) -> list[dict]:
     """Transactions filed as transfers/card payments whose other side was never
     seen. Usually means a statement is missing — and that hides real spending."""

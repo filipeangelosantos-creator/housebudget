@@ -11,7 +11,7 @@ import calendar
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from .budgets import shift_month
+from .budgets import expense_budget_total, shift_month
 
 _EXPENSE_CATS = ("a.category_id IN (SELECT c.id FROM categories c "
                  "JOIN category_groups g ON g.id = c.group_id "
@@ -130,12 +130,7 @@ def spending_pace(conn, month: str, today: date | None = None) -> dict:
     this_series = _cumulative(_daily_spend(conn, month), days)
     prev_series = _cumulative(_daily_spend(conn, prev), prev_days)
 
-    budget = conn.execute(
-        """SELECT COALESCE(SUM(b.amount_cents), 0) AS total FROM budgets b
-           JOIN categories c ON c.id = b.category_id
-           JOIN category_groups g ON g.id = c.group_id
-           WHERE b.month = ? AND g.kind = 'expense' AND c.excluded = 0""",
-        (month,)).fetchone()["total"]
+    budget = expense_budget_total(conn, month)
 
     today = today or date.today()
     elapsed = today.day if month == today.strftime("%Y-%m") else days
