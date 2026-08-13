@@ -1,20 +1,37 @@
-{% from "_macros.html" import amount with context %}
+{% from "_macros.html" import amount, category_select with context %}
 {% if rows %}
-<div class="drill-inner">
+<div class="drill-inner" data-csrf="{{ csrf }}">
   <div class="spread">
     <span class="small muted">{{ rows|length }}{{ '+' if truncated }} transaction{{ 's' if rows|length != 1 }}{% if title %} · {{ title }}{% endif %}</span>
     <strong class="small">{{ amount(rows|sum(attribute='amount_cents')) }}</strong>
   </div>
+  {% if period %}
+  {# The link opens the whole month, so it is labelled with the month — not
+     with `period`, which may be cut off partway through it. #}
+  <p class="small muted drill-period">{{ period }}{% if elsewhere %} — not the month
+    this page is showing. <a href="/insights?month={{ month }}">Open {{ month_label }}</a>{% endif %}</p>
+  {% endif %}
   <table class="tbl drill-tbl">
     {% for r in rows %}
     <tr>
       <td class="drill-date">{{ r.date[5:] }}</td>
       <td><a href="/transactions/{{ r.txn_id }}?back={{ back|urlencode }}">{{ r.description|truncate(46) }}</a>
-        <div class="muted small">{{ r.account_name }}{% if r.category %} · {{ r.category }}{% endif %}{% if r.is_split %} · <span class="chip">part of a split</span>{% endif %}</div></td>
+        <div class="muted small">{{ r.account_name }} ·
+          {% if r.is_split %}<span class="chip">part of a split</span>
+          <a href="/transactions/{{ r.txn_id }}/split?back={{ back|urlencode }}">edit split</a>
+          {% else %}
+          <button type="button" class="cat-chip" data-txn="{{ r.txn_id }}"
+                  data-cat="{{ r.category_id or '' }}"
+                  title="Change category">{{ r.category or 'uncategorized' }}</button>
+          {% endif %}
+        </div></td>
       <td class="num {{ 'pos' if r.amount_cents > 0 }}">{{ amount(r.amount_cents) }}</td>
     </tr>
     {% endfor %}
   </table>
+  {# One select, moved into whichever row is being edited: rendering sixty of
+     them would put thousands of options into a panel opened by one tap. #}
+  <span class="drill-cat-holder" hidden>{{ category_select('category_id', categories) }}</span>
   {% if truncated %}
   <p class="small muted">Showing the largest {{ rows|length }}.
     <a href="{{ more_link }}">See all in Activity</a></p>
@@ -23,5 +40,6 @@
   {% endif %}
 </div>
 {% else %}
-<div class="drill-inner"><p class="small muted">Nothing to show here.</p></div>
+<div class="drill-inner"><p class="small muted">Nothing to show
+  {% if period %}in {{ period }}{% else %}here{% endif %}.</p></div>
 {% endif %}

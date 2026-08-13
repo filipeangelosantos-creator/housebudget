@@ -17,7 +17,7 @@ LIMIT = 60
 def _fetch(conn, where: str, params: list, order: str = "a.amount_cents") -> list[dict]:
     rows = conn.execute(
         f"""SELECT a.txn_id, a.date, a.description, a.amount_cents, a.is_split,
-                   c.name AS category, ac.name AS account_name
+                   a.category_id, c.name AS category, ac.name AS account_name
             FROM txn_allocations a
             LEFT JOIN categories c ON c.id = a.category_id
             JOIN accounts ac ON ac.id = a.account_id
@@ -44,16 +44,37 @@ def recurring_rows(conn, month: str, key: str) -> list[dict]:
                   order="a.date DESC")
 
 
-def spending_rows(conn, month: str) -> list[dict]:
-    return _fetch(conn,
-                  f"substr(a.date,1,7) = ? AND a.amount_cents < 0 AND {_EXPENSE_CATS} "
-                  f"AND a.is_transfer = 0", [month])
+def spending_rows(conn, month: str, day: int = 0) -> list[dict]:
+    """Spending in a month, optionally only as far through it as `day`.
+
+    The pace card's figures are cumulative to a point in the month — "spent by
+    day 13", "same point last month" — so opening one has to stop at the same
+    day, or the rows say a bigger number than the row that was clicked.
+    """
+    where = (f"substr(a.date,1,7) = ? AND a.amount_cents < 0 AND {_EXPENSE_CATS} "
+             f"AND a.is_transfer = 0")
+    params: list = [month]
+    if day:
+        where += " AND a.date <= ?"
+        params.append(f"{month}-{min(day, 31):02d}")
+    return _fetch(conn, where, params)
 
 
 def income_rows(conn, month: str) -> list[dict]:
     return _fetch(conn,
                   f"substr(a.date,1,7) = ? AND a.amount_cents > 0 AND {_COUNTED}",
                   [month], order="a.amount_cents DESC")
+
+
+def net_rows(conn, month: str) -> list[dict]:
+    """Everything behind one month's surplus or deficit.
+
+    Net is income minus spending, so both sides belong here — ordered by size
+    regardless of direction, because what moved the month is the big figure
+    either way.
+    """
+    return _fetch(conn, f"substr(a.date,1,7) = ? AND {_COUNTED}", [month],
+                  order="ABS(a.amount_cents) DESC")
 
 
 def uncategorized_rows(conn, month: str) -> list[dict]:
@@ -70,19 +91,20 @@ def unmatched_rows(conn, month: str) -> list[dict]:
 
 
 KINDS = {
-    "category": category_rows,
-    "merchant": merchant_rows,
-    "recurring": recurring_rows,
-    "spending": lambda conn, month, key: spending_rows(conn, month),
-    "income": lambda conn, month, key: income_rows(conn, month),
-    "uncategorized": lambda conn, month, key: uncategorized_rows(conn, month),
-    "unmatched": lambda conn, month, key: unmatched_rows(conn, month),
+    "category": lambda conn, month, key, day: category_rows(conn, month, key),
+    "merchant": lambda conn, month, key, day: merchant_rows(conn, month, key),
+    "recurring": lambda conn, month, key, day: recurring_rows(conn, month, key),
+    "spending": lambda conn, month, key, day: spending_rows(conn, month, day),
+    "income": lambda conn, month, key, day: income_rows(conn, month),
+    "net": lambda conn, month, key, day: net_rows(conn, month),
+    "uncategorized": lambda conn, month, key, day: uncategorized_rows(conn, month),
+    "unmatched": lambda conn, month, key, day: unmatched_rows(conn, month),
 }
 
 
-def rows_for(conn, kind: str, month: str, key: str = "") -> list[dict]:
+def rows_for(conn, kind: str, month: str, key: str = "", day: int = 0) -> list[dict]:
     fetch = KINDS.get(kind)
-    return fetch(conn, month, key) if fetch else []
+    return fetch(conn, month, key, day) if fetch else []
 
 
 def list_link(kind: str, month: str, key: str = "") -> str:

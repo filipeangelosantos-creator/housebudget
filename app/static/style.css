@@ -227,6 +227,32 @@ tr.drill td { padding: 0 0 8px; }
                          font-variant-numeric: tabular-nums; }
 .drill-tbl .num { text-align: right; white-space: nowrap;
                   font-variant-numeric: tabular-nums; }
+/* A bar is a button too. Pseudo-elements and backgrounds don't render on SVG
+   shapes, so the affordance has to be the shape itself. */
+svg [data-drill-kind] { cursor: pointer; }
+svg [data-drill-kind]:hover { opacity: .75; }
+svg [data-drill-kind]:focus-visible,
+svg [data-drill-kind][aria-expanded="true"] {
+  outline: none; stroke: var(--ink); stroke-width: 1.2px;
+}
+.drill-period { margin: 2px 0 6px; }
+.drill-stale { margin: 6px 0 0; }
+.drill-tbl select { width: auto; max-width: 100%; padding: 2px 6px; font-size: 13px;
+                    border-radius: 7px; }
+.cat-chip { font: inherit; color: var(--muted); background: var(--track);
+            border: 1px dashed var(--axisline); border-radius: 7px;
+            padding: 0 6px; cursor: pointer; }
+.cat-chip:hover { color: var(--ink); border-style: solid; }
+.cat-chip.changed { color: var(--good-text); border-color: currentColor;
+                    border-style: solid; }
+.cat-chip.failed { color: var(--danger-text); border-color: currentColor;
+                   border-style: solid; }
+
+/* --- budget balance ------------------------------------------------------ */
+/* .pos / .neg carry the colour; this is only the weight and the rule above. */
+.balance .spread { padding: 2px 0; }
+.bal-verdict { font-size: 17px; font-weight: 650; margin-top: 6px;
+               padding-top: 8px; border-top: 1px solid var(--border); }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);

@@ -137,19 +137,32 @@
   // equivalent, and these are read on a phone.
   var drillables = document.querySelectorAll("[data-drill-kind]");
   if (drillables.length) {
-    var closeDrill = function (host) {
-      var panel = host.nextElementSibling;
-      if (panel && panel.classList.contains("drill")) panel.remove();
-      host.setAttribute("aria-expanded", "false");
+    var pageMonthEl = document.getElementById("page-month");
+    var pageMonth = pageMonthEl ? pageMonthEl.getAttribute("data-month") : "";
+    var openDrills = [];       // {anchor, host, node}
+
+    // Where the panel goes. A bar lives inside an <svg>, which can't hold
+    // HTML, so its panel goes after the whole chart — which means every bar in
+    // one chart shares an anchor, and opening one has to close the last.
+    var anchorFor = function (host) {
+      return host.ownerSVGElement || host;
     };
-    var makePanel = function (host) {
+    var closeAt = function (anchor) {
+      openDrills = openDrills.filter(function (p) {
+        if (p.anchor !== anchor) return true;
+        p.node.remove();
+        p.host.setAttribute("aria-expanded", "false");
+        return false;
+      });
+    };
+    var makePanel = function (anchor) {
       // A <div> after a <tr> gets hoisted out of the table by the parser, so a
       // row in a table needs a row of its own.
-      if (host.tagName === "TR") {
+      if (anchor.tagName === "TR") {
         var tr = document.createElement("tr");
         tr.className = "drill";
         var td = document.createElement("td");
-        td.colSpan = host.children.length || 2;
+        td.colSpan = anchor.children.length || 2;
         tr.appendChild(td);
         return { node: tr, target: td };
       }
@@ -159,21 +172,24 @@
     };
     drillables.forEach(function (host) {
       var open = function (e) {
-        if (e.target.closest("a")) return;          // links inside still navigate
+        if (e.target.closest && e.target.closest("a")) return;   // links navigate
         e.preventDefault();
-        if (host.getAttribute("aria-expanded") === "true") {
-          closeDrill(host);
-          return;
-        }
-        var made = makePanel(host);
+        var anchor = anchorFor(host);
+        var wasOpen = host.getAttribute("aria-expanded") === "true";
+        closeAt(anchor);
+        if (wasOpen) return;                        // tapping it again closes it
+        var made = makePanel(anchor);
         var panel = made.target;
         panel.innerHTML = '<p class="small muted drill-inner">Loading…</p>';
-        host.insertAdjacentElement("afterend", made.node);
+        anchor.insertAdjacentElement("afterend", made.node);
         host.setAttribute("aria-expanded", "true");
+        openDrills.push({ anchor: anchor, host: host, node: made.node });
         var url = "/insights/drill?kind=" +
           encodeURIComponent(host.getAttribute("data-drill-kind")) +
           "&key=" + encodeURIComponent(host.getAttribute("data-drill-key") || "") +
-          "&month=" + encodeURIComponent(host.getAttribute("data-drill-month") || "");
+          "&month=" + encodeURIComponent(host.getAttribute("data-drill-month") || "") +
+          "&day=" + encodeURIComponent(host.getAttribute("data-drill-day") || "0") +
+          "&page_month=" + encodeURIComponent(pageMonth);
         fetch(url)
           .then(function (r) { return r.text(); })
           .then(function (html) { panel.innerHTML = html; })
@@ -183,10 +199,69 @@
           });
       };
       host.addEventListener("click", open);
-      // role="button" on a div gets no free keyboard activation.
+      // role="button" on a div (or an SVG bar) gets no free keyboard activation.
       host.addEventListener("keydown", function (e) {
         if (e.key === "Enter" || e.key === " ") open(e);
       });
+    });
+
+    // Re-filing from inside a panel. The select is moved into the row being
+    // edited rather than cloned per row — sixty selects is thousands of
+    // options in something opened by one tap.
+    document.addEventListener("click", function (e) {
+      var chip = e.target.closest(".cat-chip");
+      if (!chip) return;
+      var panel = chip.closest(".drill-inner");
+      var holder = panel.querySelector(".drill-cat-holder");
+      var select = holder.querySelector("select");
+      if (select.__chip === chip) return;           // already editing this row
+      if (select.__chip) select.__chip.hidden = false;
+      select.__chip = chip;
+      select.value = chip.getAttribute("data-cat") || "";
+      chip.hidden = true;
+      chip.insertAdjacentElement("afterend", select);
+      select.focus();
+    });
+    document.addEventListener("change", function (e) {
+      var select = e.target;
+      var chip = select.__chip;         // only set while it sits in a row
+      if (!chip) return;
+      var panel = select.closest(".drill-inner");
+      var body = new URLSearchParams();
+      body.set("csrf", panel.getAttribute("data-csrf") || "");
+      body.set("txn_id", chip.getAttribute("data-txn"));
+      body.set("category_id", select.value);
+      select.disabled = true;
+      fetch("/insights/drill/categorize", { method: "POST", body: body })
+        .then(function (r) {
+          if (!r.ok) throw new Error("failed");
+          return r.json();
+        })
+        .then(function (data) {
+          chip.textContent = data.category || "uncategorized";
+          chip.setAttribute("data-cat", select.value);
+          chip.classList.add("changed");
+          // The figures above were computed before this change, so say so
+          // rather than leaving a total that no longer matches its rows.
+          if (!panel.querySelector(".drill-stale")) {
+            var note = document.createElement("p");
+            note.className = "small muted drill-stale";
+            note.innerHTML = 'Saved. The totals and charts still show the old ' +
+              'figures — <a href="">reload</a> to bring them up to date.';
+            note.querySelector("a").href = location.href;
+            panel.appendChild(note);
+          }
+        })
+        .catch(function () {
+          chip.classList.add("failed");
+          chip.textContent = "couldn't save — open it instead";
+        })
+        .then(function () {
+          select.disabled = false;
+          select.__chip = null;
+          chip.hidden = false;
+          panel.querySelector(".drill-cat-holder").appendChild(select);
+        });
     });
   }
 
@@ -294,6 +369,72 @@
       if (e.target.classList.contains("split-amt")) recalc();
     });
     recalc();
+  }
+
+  // Budget editor: keep "does this fit inside my income?" answered while you
+  // type, not only after saving. The wording matches budgets.html, which is
+  // what renders without JS.
+  var balance = document.getElementById("balance");
+  if (balance) {
+    var symbol = balance.getAttribute("data-currency") || "";
+    var expected = parseInt(balance.getAttribute("data-expected"), 10) || 0;
+    var cents = function (text) {
+      var t = String(text).replace(/[^\d.,-]/g, "");
+      if (!t) return 0;
+      var dot = t.lastIndexOf("."), comma = t.lastIndexOf(",");
+      var dec = Math.max(dot, comma);
+      // Whichever separator comes last is the decimal one; a group of three
+      // digits after it means it was a thousands separator after all.
+      if (dec > -1 && t.length - dec - 1 === 3) dec = -1;
+      var whole = dec > -1 ? t.slice(0, dec) : t;
+      var frac = dec > -1 ? t.slice(dec + 1) : "";
+      var n = parseInt(whole.replace(/[^\d-]/g, ""), 10) || 0;
+      var f = parseInt((frac + "00").slice(0, 2), 10) || 0;
+      return n * 100 + (n < 0 ? -f : f);
+    };
+    var show = function (v) {
+      return symbol + (Math.abs(v) / 100).toFixed(2)
+        .replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+    };
+    var sumOf = function (kind) {
+      var total = 0;
+      document.querySelectorAll('input[data-kind="' + kind + '"]').forEach(
+        function (i) { total += cents(i.value); });
+      return total;
+    };
+    var verdict = document.getElementById("bal-verdict");
+    var note = document.getElementById("bal-note");
+    var recalcBalance = function () {
+      var inc = sumOf("income"), exp = sumOf("expense");
+      var base = inc || expected;
+      var gap = base - exp;
+      document.getElementById("bal-income").textContent = show(inc);
+      document.getElementById("bal-spending").textContent = show(exp);
+      if (!base) {
+        verdict.textContent = "Set a budget to see whether it fits your income";
+        note.textContent = "Budget your income first, then your spending.";
+      } else if (gap > 0) {
+        verdict.textContent = show(gap) + " left to allocate";
+        note.textContent = "Planned spending fits inside planned income.";
+      } else if (gap === 0) {
+        verdict.textContent = "Every " + symbol + " of income is allocated";
+        note.textContent = "Planned spending fits inside planned income.";
+      } else {
+        verdict.textContent = show(gap) + " more than your income";   // show() is abs
+        note.textContent = "Your plan spends more than you plan to earn — trim a " +
+          "category or raise the income budget.";
+      }
+      if (!inc && expected) {
+        note.textContent = "No income budgeted yet, so this is measured against " +
+          "the " + show(expected) + " your paydays are expected to bring in.";
+      }
+      verdict.classList.toggle("neg", gap < 0 && !!base);
+      verdict.classList.toggle("pos", gap >= 0 || !base);
+    };
+    document.addEventListener("input", function (e) {
+      if (e.target.hasAttribute && e.target.hasAttribute("data-kind")) recalcBalance();
+    });
+    recalcBalance();
   }
 
   // Import form: reveal new-account fields when "new" is selected.

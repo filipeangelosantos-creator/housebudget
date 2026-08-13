@@ -7,6 +7,20 @@ baseline; native <title> elements provide value tooltips.
 from html import escape
 
 
+def _drill(kind: str, month: str, key: str = "") -> str:
+    """Attributes that turn a bar into a button opening what it's made of.
+
+    The month travels with the bar rather than being taken from the page, so
+    July's bar opens July even while the page header says August. Read by the
+    same handler as the drillable rows in the templates.
+    """
+    attrs = (f' data-drill-kind="{kind}" data-drill-month="{escape(month, quote=True)}"'
+             f' role="button" tabindex="0" aria-expanded="false"')
+    if key:
+        attrs += f' data-drill-key="{escape(key, quote=True)}"'
+    return attrs
+
+
 def _rounded_top_bar(x: float, y: float, w: float, h: float, r: float = 2.5) -> str:
     if h <= 0.5:
         return f"M{x:.1f},{y + h:.1f} h{w:.1f} v-{max(h, 0.5):.1f} h-{w:.1f} Z"
@@ -52,8 +66,9 @@ def cashflow_chart(flow: list[dict], width: int = 360, height: int = 130) -> str
             y = pad_top + plot_h - h
             title = (f"{f['month']}: {'income' if key == 'income' else 'spending'} "
                      f"{val / 100:,.2f}")
-            parts.append(f'<path d="{_rounded_top_bar(x, y, bar_w, h)}" class="{cls}">'
-                         f'<title>{escape(title)}</title></path>')
+            drill = _drill("income" if key == "income" else "spending", f["month"])
+            parts.append(f'<path d="{_rounded_top_bar(x, y, bar_w, h)}" class="{cls}"'
+                         f'{drill}><title>{escape(title)}</title></path>')
         if n <= 6 or i % 3 == (n - 1) % 3:  # thin out labels, keep the last one
             parts.append(f'<text x="{cx:.1f}" y="{height - 4}" class="chart-label" '
                          f'text-anchor="middle">{escape(month_label)}</text>')
@@ -147,7 +162,8 @@ def net_bars_chart(nets: list[dict], width: int = 360, height: int = 130) -> str
         d = (_rounded_top_bar(cx - bar_w / 2, y, bar_w, h)
              if surplus else _rounded_bottom_bar(cx - bar_w / 2, y, bar_w, h))
         label = "surplus" if surplus else "deficit"
-        parts.append(f'<path d="{d}" class="{cls}"><title>{entry["month"]}: '
+        parts.append(f'<path d="{d}" class="{cls}"{_drill("net", entry["month"])}>'
+                     f'<title>{entry["month"]}: '
                      f'{abs(entry["net"]) / 100:,.2f} {label}</title></path>')
         if n <= 6 or i % 3 == (n - 1) % 3:
             parts.append(f'<text x="{cx:.1f}" y="{height - 3}" class="chart-label" '
@@ -189,10 +205,14 @@ def stacked_chart(composition: dict, width: int = 360, height: int = 165) -> str
             if h < 0.7:
                 continue
             top = y_cursor - h
+            # "Other" is a roll-up of everything outside the top categories, so
+            # there is no single category to open it into.
+            drill = ("" if s["name"] == "Other"
+                     else _drill("category", month, s["name"]))
             parts.append(
                 f'<rect x="{cx - bar_w / 2:.1f}" y="{top:.1f}" width="{bar_w:.1f}" '
                 f'height="{max(h - gap, 0.7):.1f}" rx="1.5" '
-                f'class="series-{si % 7 + 1}"><title>{escape(month)} · '
+                f'class="series-{si % 7 + 1}"{drill}><title>{escape(month)} · '
                 f'{escape(s["name"])}: {value / 100:,.2f}</title></rect>')
             y_cursor = top
         if n <= 6 or i % 3 == (n - 1) % 3:
@@ -215,8 +235,14 @@ def _rounded_bottom_bar(x: float, y: float, w: float, h: float, r: float = 2.5) 
             f"v-{h - r:.1f} Z")
 
 
-def spark_bars(series: list[int], width: int = 132, height: int = 34) -> str:
-    """Tiny single-series trend (one category's monthly spend, cents)."""
+def spark_bars(series: list[int], width: int = 132, height: int = 34,
+               months: list[str] | None = None, category: str = "") -> str:
+    """Tiny single-series trend (one category's monthly spend, cents).
+
+    Given the months the bars stand for, each one opens that month's charges
+    for the category — the point of a six-month trend is the months that
+    aren't this one.
+    """
     if not series:
         return ""
     n = len(series)
@@ -230,7 +256,10 @@ def spark_bars(series: list[int], width: int = 132, height: int = 34) -> str:
         x = i * (bar_w + gap)
         y = height - h
         cls = "spark-bar current" if i == n - 1 else "spark-bar"
-        parts.append(f'<path d="{_rounded_top_bar(x, y, bar_w, h, 2)}" class="{cls}">'
-                     f'<title>{val / 100:,.2f}</title></path>')
+        month = months[i] if months and i < len(months) else ""
+        drill = _drill("category", month, category) if month and category else ""
+        label = f"{month}: {val / 100:,.2f}" if month else f"{val / 100:,.2f}"
+        parts.append(f'<path d="{_rounded_top_bar(x, y, bar_w, h, 2)}" class="{cls}"'
+                     f'{drill}><title>{escape(label)}</title></path>')
     parts.append("</svg>")
     return "".join(parts)

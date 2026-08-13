@@ -9,11 +9,37 @@
   <a href="/budgets?month={{ next_month }}" aria-label="Next month">›</a>
 </div>
 
-<p class="small muted">Planned income {{ currency }}{{ summary.income_budget|money }} −
-planned spending {{ currency }}{{ summary.expense_budget|money }} =
-<strong class="{{ 'pos' if summary.income_budget - summary.expense_budget >= 0 else 'neg' }}">
-{{ plain(summary.income_budget - summary.expense_budget) }}</strong>
-· <a href="/categories">Edit categories</a></p>
+{# Whether the plan fits inside the income is the question this page exists to
+   answer, so it is stated in words at the top and kept live as you type —
+   finding out only after saving is finding out too late. The wording is
+   repeated in app.js for the live version; this one is what you get without
+   JS, and what the tests read. #}
+{% set inc = summary.income_budget %}
+{% set base = inc if inc else income.total %}
+{% set gap = base - summary.expense_budget %}
+<div class="card balance" id="balance" data-expected="{{ income.total }}"
+     data-currency="{{ currency }}">
+  <div class="spread"><span class="small muted">Planned income</span>
+    <strong id="bal-income">{{ currency }}{{ inc|money }}</strong></div>
+  <div class="spread"><span class="small muted">Planned spending</span>
+    <strong id="bal-spending">{{ currency }}{{ summary.expense_budget|money }}</strong></div>
+  <div class="bal-verdict {{ 'neg' if gap < 0 else 'pos' }}" id="bal-verdict">
+    {%- if not base %}Set a budget to see whether it fits your income
+    {%- elif gap > 0 %}{{ currency }}{{ gap|money }} left to allocate
+    {%- elif gap == 0 %}Every {{ currency }} of income is allocated
+    {%- else %}{{ currency }}{{ gap|money }} more than your income
+    {%- endif %}</div>
+  <p class="small muted" id="bal-note">
+    {%- if not base %}Budget your income first, then your spending.
+    {%- elif not inc and income.total %}No income budgeted yet, so this is measured
+      against the {{ currency }}{{ income.total|money }} your paydays are expected to
+      bring in.
+    {%- elif gap < 0 %}Your plan spends more than you plan to earn — trim a category
+      or raise the income budget.
+    {%- else %}Planned spending fits inside planned income.
+    {%- endif %}</p>
+  <p class="small muted"><a href="/categories">Edit categories</a></p>
+</div>
 
 {% if summary.budget_from %}
 <div class="banner">
@@ -94,6 +120,7 @@ planned spending {{ currency }}{{ summary.expense_budget|money }} =
         <div class="hint">{{ 'received' if group.kind == 'income' else 'spent' }} {{ plain(line.actual) }} this month</div>
       </div>
       <input type="text" inputmode="decimal" name="cat_{{ line.id }}"
+             data-kind="{{ group.kind }}"
              value="{{ line.budget|money_plain }}" placeholder="0">
     </div>
     {% endif %}

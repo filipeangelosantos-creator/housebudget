@@ -8,6 +8,9 @@
   <span class="label">Insights · {{ month_label }}</span>
   <a href="/insights?month={{ next_month }}" aria-label="Next month">›</a>
 </div>
+{# Bars carry their own month, so a panel needs to know which month the page is
+   on to tell you when it is showing you a different one. #}
+<span id="page-month" data-month="{{ month }}" hidden></span>
 
 {% for a in alerts %}
 <div class="banner bad" data-drill-kind="category" data-drill-key="{{ a.category }}"
@@ -40,10 +43,16 @@
   {{ pace_svg|safe }}
   <table class="tbl" style="margin-top:8px">
     <tr data-drill-kind="spending" data-drill-month="{{ month }}"
+        data-drill-day="{{ pace.elapsed }}"
         role="button" tabindex="0" aria-expanded="false">
       <td>Spent by day {{ pace.elapsed }}</td>
       <td class="num"><strong>{{ currency }}{{ pace.spent|money }}</strong></td></tr>
-    <tr><td>Same point last month</td>
+    {# "Same point" is the same day count, clamped to a shorter month — the
+       same clamp spending_pace applies to the figure beside it. #}
+    <tr data-drill-kind="spending" data-drill-month="{{ prev_month }}"
+        data-drill-day="{{ [pace.elapsed, pace.prev_days]|min }}"
+        role="button" tabindex="0" aria-expanded="false">
+      <td>Same point last month</td>
       <td class="num">{{ currency }}{{ pace.prev_same_day|money }}
         {% if pace.prev_same_day %}
         <span class="{{ 'neg' if pace.spent > pace.prev_same_day else 'pos' }}">
@@ -68,6 +77,7 @@
   {{ net_svg|safe }}
   {% set positives = nets|selectattr('net', 'gt', 0)|list %}
   <p class="small muted">
+    Tap any bar to see that month.
     {{ positives|length }} of {{ nets|length }} months ended with money left over.
     {% if summary.savings_rate is not none %}
     This month you kept {{ summary.savings_rate }}% of income ({{ plain(summary.net) }}).
@@ -83,6 +93,7 @@
     <span><span class="sw spent"></span>Spending</span>
   </div>
   {{ cashflow_svg|safe }}
+  <p class="small muted">Tap a bar for the income or spending that made it.</p>
 </div>
 
 {# --- Where the money goes, over time --- #}
@@ -102,7 +113,8 @@
     {% endfor %}
   </div>
   <p class="small muted">Each bar is one month; the figure beside each category is
-  {{ month_label }}{% if is_current_month %} so far — the month is still in progress{% endif %}.</p>
+  {{ month_label }}{% if is_current_month %} so far — the month is still in progress{% endif %}.
+  Tap any segment for that category in that month.</p>
 </div>
 {% endif %}
 
@@ -150,7 +162,8 @@
     <span class="tot">{{ currency }}{{ t.series[-1]|money }}</span>
   </div>
   {% endfor %}
-  <p class="small muted">Bars show monthly spend; the solid bar is {{ month_label }}.</p>
+  <p class="small muted">Bars show monthly spend; the solid bar is {{ month_label }}.
+  Tap a bar for that month's charges, or the row for {{ month_label }}.</p>
 </div>
 {% endif %}
 

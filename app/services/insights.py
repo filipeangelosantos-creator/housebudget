@@ -60,7 +60,8 @@ def category_trends(conn, month: str, n: int = 6, top: int = 8) -> list[dict]:
         entry["months"][r["m"]] = r["spent"]
         entry["total"] += r["spent"]
     ranked = sorted(per_cat.values(), key=lambda e: -e["total"])[:top]
-    return [{"name": e["name"], "total": e["total"],
+    # The months travel with the series so each bar can say which one it is.
+    return [{"name": e["name"], "total": e["total"], "months": seq,
              "series": [max(0, e["months"].get(m, 0)) for m in seq]} for e in ranked]
 
 
