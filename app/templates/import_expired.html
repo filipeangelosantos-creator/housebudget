@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Upload expired{% endblock %}
+{% block content %}
+
+<h1>That upload is no longer held</h1>
+<div class="card">
+  <p>Uploaded files are kept only until you confirm or leave them, and this one is
+  gone. Nothing was imported from it.</p>
+  {% if remaining %}
+  <p class="small muted">{{ remaining }} file{{ 's' if remaining != 1 }} from this
+  batch {{ 'are' if remaining != 1 else 'is' }} still queued.</p>
+  {% endif %}
+  <p class="small muted">This happens if the app restarted, the upload sat for more
+  than half a day, or the page was left open and submitted later. Re-uploading is
+  safe — anything already imported is detected and skipped.</p>
+</div>
+
+<div class="actions">
+  {% if batch %}
+  <a class="btn" href="/import/resume/{{ batch }}">Continue with the rest</a>
+  {% endif %}
+  <a class="btn {{ 'ghost' if batch else '' }}" href="/import">Upload again</a>
+</div>
+
+{% endblock %}

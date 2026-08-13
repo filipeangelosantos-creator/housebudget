@@ -8,6 +8,7 @@ while re-importing an overlapping statement skips existing rows.
 import hashlib
 import json
 import secrets
+import time
 from dataclasses import dataclass, field
 
 from .. import config
@@ -226,7 +227,8 @@ def load_profile(conn, account_id: int, header_sig: str) -> Mapping | None:
 
 # --- pending uploads (between preview and confirm) ---------------------------
 
-def stash_pending(filename: str, data: bytes, account_id: int) -> str:
+def stash_pending(filename: str, data: bytes, account_id: int,
+                  cleanup: bool = True) -> str:
     config.ensure_dirs()
     token = secrets.token_hex(16)
     (config.PENDING_DIR / f"{token}.bin").write_bytes(data)
@@ -235,7 +237,8 @@ def stash_pending(filename: str, data: bytes, account_id: int) -> str:
     (config.PENDING_DIR / f"{token}.json").write_text(
         json.dumps({"filename": filename, "account_id": account_id}),
         encoding="utf-8")
-    _cleanup_pending()
+    if cleanup:
+        _cleanup_pending()
     return token
 
 
@@ -257,30 +260,40 @@ def drop_pending(token: str) -> None:
 
 # --- batches: several statements queued for one account ----------------------
 
+BATCH_PREFIX = "batch-"       # distinct from a token, which is plain hex
+
+
+def _batch_path(batch: str):
+    return config.PENDING_DIR / f"{BATCH_PREFIX}{batch}.json"
+
+
 def stash_batch(files: list[tuple[str, bytes]], account_id: int) -> str:
     """Queue several uploads; each is still previewed and confirmed in turn."""
     config.ensure_dirs()
-    tokens = [stash_pending(name, data, account_id) for name, data in files]
+    # Cleanup is deferred until the batch file exists — otherwise tidying up
+    # after each file can delete earlier files of this very batch.
+    tokens = [stash_pending(name, data, account_id, cleanup=False)
+              for name, data in files]
     batch = secrets.token_hex(16)
-    (config.PENDING_DIR / f"b{batch}.json").write_text(json.dumps({
+    _batch_path(batch).write_text(json.dumps({
         "account_id": account_id, "tokens": tokens, "index": 0,
         "names": [name for name, _ in files], "results": [], "skipped": []}),
         encoding="utf-8")
+    _cleanup_pending()
     return batch
 
 
 def load_batch(batch: str) -> dict | None:
     if not batch.isalnum():
         return None
-    path = config.PENDING_DIR / f"b{batch}.json"
+    path = _batch_path(batch)
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
 
 
 def save_batch(batch: str, state: dict) -> None:
-    (config.PENDING_DIR / f"b{batch}.json").write_text(
-        json.dumps(state), encoding="utf-8")
+    _batch_path(batch).write_text(json.dumps(state), encoding="utf-8")
 
 
 def drop_batch(batch: str) -> None:
@@ -288,10 +301,60 @@ def drop_batch(batch: str) -> None:
     if state:
         for token in state.get("tokens", []):
             drop_pending(token)
-    (config.PENDING_DIR / f"b{batch}.json").unlink(missing_ok=True)
+    _batch_path(batch).unlink(missing_ok=True)
 
 
-def _cleanup_pending(max_files: int = 40) -> None:
-    files = sorted(config.PENDING_DIR.glob("*"), key=lambda p: p.stat().st_mtime)
-    for f in files[:-max_files]:
-        f.unlink(missing_ok=True)
+PENDING_MAX_AGE_SECONDS = 12 * 3600
+PENDING_MAX_FILES = 600
+
+
+def _live_batch_tokens() -> set[str]:
+    """Uploads a queued batch still needs. These are never tidied away."""
+    tokens: set[str] = set()
+    for path in config.PENDING_DIR.glob(f"{BATCH_PREFIX}*.json"):
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+        tokens.update(str(t) for t in state.get("tokens", []))
+    return tokens
+
+
+def _cleanup_pending(max_files: int = PENDING_MAX_FILES,
+                     max_age: int = PENDING_MAX_AGE_SECONDS) -> None:
+    """Clear out abandoned uploads.
+
+    Age-based rather than count-based: a count cap silently ate uploads out of
+    a large batch before they were previewed, which surfaced as "Upload
+    expired" partway through. Anything a queued batch still refers to is kept
+    regardless.
+    """
+    now = time.time()
+    # An abandoned batch goes as a unit, so its uploads can't linger protected
+    # by a batch nobody will ever finish.
+    for path in config.PENDING_DIR.glob(f"{BATCH_PREFIX}*.json"):
+        try:
+            expired = now - path.stat().st_mtime > max_age
+        except OSError:
+            continue
+        if expired:
+            drop_batch(path.stem[len(BATCH_PREFIX):])
+
+    protected = _live_batch_tokens()
+    entries = []
+    for path in config.PENDING_DIR.glob("*"):
+        if path.name.startswith(BATCH_PREFIX) or path.stem in protected:
+            continue
+        try:
+            stamp = path.stat().st_mtime
+        except OSError:
+            continue
+        if now - stamp > max_age:
+            path.unlink(missing_ok=True)
+        else:
+            entries.append((stamp, path))
+
+    # Backstop against unbounded growth if something never expires.
+    if len(entries) > max_files:
+        for _, path in sorted(entries)[:len(entries) - max_files]:
+            path.unlink(missing_ok=True)

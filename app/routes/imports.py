@@ -140,12 +140,31 @@ def _apply_saved_profile(conn, acct_id: int, filename: str, data: bytes, stmt):
     return load_statement(filename, data, mapping=profile), True
 
 
+def _expired(request, conn, batch: str = ""):
+    """A readable page rather than a raw error when an upload is no longer held."""
+    state = importer.load_batch(batch) if batch else None
+    remaining = 0
+    if state:
+        remaining = sum(1 for t in state["tokens"][state["index"]:]
+                        if importer.load_pending(t) is not None)
+    return render(request, conn, "import_expired.html",
+                  batch=batch if remaining else "", remaining=remaining)
+
+
+@router.get("/import/resume/{batch}")
+def import_resume(batch: str, request: Request, conn=Depends(get_conn),
+                  user=Depends(current_user)):
+    """Pick a partly-finished batch back up at its next readable file."""
+    if importer.load_batch(batch) is None:
+        return _expired(request, conn)
+    return _preview_batch_item(request, conn, batch)
+
+
 def _preview_batch_item(request: Request, conn, batch: str):
     """Show the preview for the batch's current file, skipping unreadable ones."""
     state = importer.load_batch(batch)
     if state is None:
-        raise HTTPException(status_code=410,
-                            detail="Upload expired — please upload the files again.")
+        return _expired(request, conn)
     acct_id = state["account_id"]
     while state["index"] < len(state["tokens"]):
         token = state["tokens"][state["index"]]
@@ -215,7 +234,17 @@ async def import_commit(request: Request, conn=Depends(get_conn),
     batch = str(form.get("batch", ""))
     pending = importer.load_pending(token)
     if pending is None:
-        raise HTTPException(status_code=410, detail="Upload expired — please upload the file again.")
+        # One file of a batch can go missing without losing the rest.
+        if batch and importer.load_batch(batch) is not None:
+            state = importer.load_batch(batch)
+            if state["index"] < len(state["tokens"]) \
+                    and state["tokens"][state["index"]] == token:
+                state["skipped"].append({"filename": "a queued file",
+                                         "reason": "no longer held"})
+                state["index"] += 1
+                importer.save_batch(batch, state)
+            return _preview_batch_item(request, conn, batch)
+        return _expired(request, conn, batch)
     filename, data, account_id = pending
 
     stmt = load_statement(filename, data)
