@@ -10,6 +10,7 @@ import json
 import secrets
 import time
 from dataclasses import dataclass, field
+from datetime import date
 
 from .. import config
 from ..db import utcnow
@@ -72,6 +73,7 @@ class PreviewStats:
     date_min: str
     date_max: str
     duplicate_sources: list[dict] = field(default_factory=list)
+    future_dated: int = 0
 
 
 def duplicate_sources(conn, hashes: list[str | None]) -> list[dict]:
@@ -118,11 +120,16 @@ def preview_stats(conn, account_id: int, rows: list[ParsedRow]) -> PreviewStats:
         if classify.classify(rules, norm, classify.merchant_key(r.description)):
             categorized += 1
     dates = sorted(str(r.date) for r in ok)
+    # A statement cannot contain next year's spending: rows dated ahead of
+    # today mean the year was read wrong, usually on MM/DD rows.
+    today = date.today().isoformat()
+    ahead = sum(1 for d in dates if d > today)
     return PreviewStats(
         total=len(rows), ok=len(ok), failed=len(rows) - len(ok),
         duplicates=len(dup_hashes), would_categorize=categorized,
         date_min=dates[0] if dates else "", date_max=dates[-1] if dates else "",
-        duplicate_sources=duplicate_sources(conn, dup_hashes))
+        duplicate_sources=duplicate_sources(conn, dup_hashes),
+        future_dated=ahead)
 
 
 @dataclass

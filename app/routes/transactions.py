@@ -9,7 +9,7 @@ from fastapi.responses import RedirectResponse
 
 from ..db import utcnow
 from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
-from ..services import classify, splits as splits_svc
+from ..services import classify, review, splits as splits_svc
 from .dashboard import clean_month
 
 router = APIRouter()
@@ -250,19 +250,8 @@ def txn_confirm(txn_id: int, request: Request, conn=Depends(get_conn),
 
 @router.get("/review")
 def review_page(request: Request, conn=Depends(get_conn), user=Depends(current_user)):
-    # A transaction already matched to the other side of a transfer is
-    # accounted for; asking for a category on it is noise.
-    unpaired = ("NOT EXISTS (SELECT 1 FROM transfer_links l "
-                "WHERE l.out_txn_id = t.id OR l.in_txn_id = t.id)")
-    rows = conn.execute(
-        f"SELECT t.id, t.date, t.description, t.amount_cents, t.merchant_key, "
-        f"a.name AS account_name FROM transactions t "
-        f"JOIN accounts a ON a.id = t.account_id "
-        f"WHERE t.category_id IS NULL AND {unpaired} "
-        f"ORDER BY t.date DESC, t.id DESC LIMIT 50").fetchall()
-    total = conn.execute(
-        f"SELECT COUNT(*) FROM transactions t "
-        f"WHERE t.category_id IS NULL AND {unpaired}").fetchone()[0]
+    rows = review.needs_category_rows(conn)
+    total = review.needs_category_count(conn)
     suggestions = {r["id"]: classify.suggest_pattern(r["description"]) for r in rows}
     # What the app guessed for each one, from how you've filed that merchant before
     guesses = {r["id"]: splits_svc.suggest_category(conn, r["merchant_key"], r["id"])

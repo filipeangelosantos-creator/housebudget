@@ -8,7 +8,7 @@ from ..db import utcnow
 from ..deps import current_user, get_conn, render, verify_csrf
 from ..parsing.csv_parser import Mapping, apply_mapping
 from ..parsing.statements import SUPPORTED_EXTENSIONS, load_statement
-from ..services import importer, splits, transfers
+from ..services import importer, review, splits, transfers
 
 router = APIRouter()
 
@@ -197,8 +197,7 @@ def _finish_batch(request: Request, conn, batch: str, state: dict):
             totals[key] += entry.get(key, 0)
     importer.drop_batch(batch)
     linked = transfers.auto_link(conn)
-    uncat = conn.execute(
-        "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
+    uncat = review.needs_category_count(conn)
     return render(request, conn, "import_batch_result.html",
                   totals=totals, results=state["results"],
                   skipped=state["skipped"], uncat=uncat, linked=linked,
@@ -288,8 +287,7 @@ async def import_commit(request: Request, conn=Depends(get_conn),
 
     # Now that both sides may be present, match up internal movements.
     linked = transfers.auto_link(conn)
-    uncat = conn.execute(
-        "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
+    uncat = review.needs_category_count(conn)
     return render(request, conn, "import_result.html", result=result,
                   filename=filename, uncat=uncat, linked=linked,
                   transfer_suggestions=transfers.suggestion_count(conn),

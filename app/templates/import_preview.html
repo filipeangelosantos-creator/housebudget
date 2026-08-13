@@ -20,6 +20,13 @@
 check the dates and amounts below before importing. If a column looks wrong, fix it
 under “Column mapping”.</div></div>
 {% endif %}
+{% if stats.future_dated %}
+<div class="banner bad"><div class="grow">
+  <strong>{{ stats.future_dated }} row{{ 's' if stats.future_dated != 1 }}
+  dated in the future.</strong> A statement can't contain spending that hasn't
+  happened, so the year was read wrong — most likely on rows showing only day
+  and month. Check the date column below before importing.</div></div>
+{% endif %}
 {% if suggest_flip %}
 <div class="banner warn"><div class="grow">Most amounts in this credit-card file are positive —
 if charges should count as spending, tick “flip signs” in the column mapping

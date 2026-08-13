@@ -4,7 +4,7 @@ import re
 from fastapi import APIRouter, Depends, Request
 
 from ..deps import current_user, get_conn, render
-from ..services import budgets, insights, splits as splits_svc, transfers
+from ..services import budgets, insights, review, splits as splits_svc, transfers
 
 router = APIRouter()
 
@@ -23,15 +23,17 @@ def dashboard(request: Request, conn=Depends(get_conn),
     m = clean_month(month)
     summary = budgets.month_summary(conn, m)
     alerts = insights.anomalies(conn, m)
+    # Everything else on this page is about the chosen month, so this is too —
+    # otherwise a stray future-dated row shows up under "latest".
     recent = conn.execute(
         "SELECT t.id, t.date, t.description, t.amount_cents, c.name AS category "
         "FROM transactions t LEFT JOIN categories c ON c.id = t.category_id "
-        "ORDER BY t.date DESC, t.id DESC LIMIT 8").fetchall()
+        "WHERE substr(t.date, 1, 7) = ? "
+        "ORDER BY t.date DESC, t.id DESC LIMIT 8", (m,)).fetchall()
     has_any_txn = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0] > 0
     has_budget = conn.execute("SELECT COUNT(*) FROM budgets WHERE month = ?",
                               (m,)).fetchone()[0] > 0
-    total_uncat = conn.execute(
-        "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
+    total_uncat = review.needs_category_count(conn)
     return render(
         request, conn, "dashboard.html",
         month=m, prev_month=budgets.shift_month(m, -1),
@@ -40,4 +42,5 @@ def dashboard(request: Request, conn=Depends(get_conn),
         recent=recent, has_any_txn=has_any_txn, has_budget=has_budget,
         total_uncat=total_uncat,
         to_confirm=splits_svc.pending_confirmation_count(conn),
-        transfer_suggestions=transfers.suggestion_count(conn))
+        transfer_suggestions=transfers.suggestion_count(conn),
+        future_dated=review.future_dated(conn))

@@ -46,6 +46,18 @@
 </a>
 {% endif %}
 
+{% if future_dated %}
+{% set ahead = future_dated|sum(attribute='n') %}
+<div class="banner bad">
+  <div class="grow">
+    <strong>{{ ahead }} transaction{{ 's' if ahead != 1 }} dated in the future</strong>
+    ({% for f in future_dated %}{{ f.month }}{{ ', ' if not loop.last }}{% endfor %}).
+    A statement can't contain spending that hasn't happened — the year was read
+    wrong on import. Undo that import and import it again.</div>
+  <a class="btn small" href="/transactions?month={{ future_dated[0].month }}">Find them</a>
+</div>
+{% endif %}
+
 {% if transfer_suggestions > 0 %}
 <a href="/transfers" style="text-decoration:none">
   <div class="banner">
@@ -114,7 +126,8 @@
 
 {% if recent %}
 <div class="card">
-  <h2>Latest activity <a class="h2-link" href="/transactions">all ›</a></h2>
+  <h2>{{ month_label }} activity
+    <a class="h2-link" href="/transactions?month={{ month }}">all ›</a></h2>
   {% for t in recent %}
   <div class="txn">
     <div class="mid">
