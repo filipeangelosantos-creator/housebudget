@@ -38,7 +38,8 @@
       or raise the income budget.
     {%- else %}Planned spending fits inside planned income.
     {%- endif %}</p>
-  <p class="small muted"><a href="/categories">Edit categories</a></p>
+  <p class="small muted"><a href="/plan?month={{ month }}">Set what's scheduled</a>
+    · <a href="/categories">Edit categories</a></p>
 </div>
 
 {% if copied is not none %}
@@ -134,7 +135,11 @@
            figure offered here is the set-aside, not the bill. #}
         <div class="hint bill-hint">{{ bill.cadence }} · {{ currency }}{{ bill.typical_cents|money }}
           next due {{ bill.next_due|day_month_year }} — set aside
-          <strong>{{ currency }}{{ bill.monthly_cents|money }}</strong>/month</div>
+          <strong>{{ currency }}{{ bill.monthly_cents|money }}</strong>/month
+          <a href="/plan?category={{ line.id }}&month={{ month }}">{{ 'change' if bill.declared else 'confirm' }}</a></div>
+        {% else %}
+        <div class="hint"><a class="plan-link"
+          href="/plan?category={{ line.id }}&month={{ month }}">not every month?</a></div>
         {% endif %}
       </div>
       <input type="text" inputmode="decimal" name="cat_{{ line.id }}"
@@ -146,8 +151,18 @@
   </div>
   {% endfor %}
 
-  <div class="actions">
-    <button class="btn" type="submit">Save budget</button>
+  {# Carry-forward means an unset month follows the last one set, so "from here
+     on" clears the later figures that would override this rather than writing
+     the same number into every future month. #}
+  <div class="card save-scope">
+    <label class="f">When you save, apply these figures</label>
+    <select name="scope">
+      <option value="onward">from {{ month_label }} on — later months follow this</option>
+      <option value="month">to {{ month_label }} only — leave later months alone</option>
+    </select>
+    <div class="actions">
+      <button class="btn" type="submit">Save budget</button>
+    </div>
   </div>
 </form>
 

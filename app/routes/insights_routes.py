@@ -22,8 +22,11 @@ def _ordinal(day: int) -> str:
 
 @router.get("/insights")
 def insights_page(request: Request, conn=Depends(get_conn),
-                  user=Depends(current_user), month: str | None = None):
+                  user=Depends(current_user), month: str | None = None,
+                  applied: int | None = None):
     m = clean_month(month)
+    applied_row = conn.execute("SELECT name FROM categories WHERE id = ?",
+                               (applied,)).fetchone() if applied else None
     flow = insights.cashflow(conn, m, 12)
     trends = insights.category_trends(conn, m, 6)
     for t in trends:
@@ -54,6 +57,7 @@ def insights_page(request: Request, conn=Depends(get_conn),
                   alerts=insights.anomalies(conn, m),
                   review=insights.budget_review(conn, m),
                   bills=insights.periodic_bills(conn, m),
+                  applied_label=applied_row["name"] if applied_row else "",
                   unmatched=transfers.unmatched_transfers(conn, m),
                   months_with_data=months_with_data,
                   is_current_month=is_current_month,

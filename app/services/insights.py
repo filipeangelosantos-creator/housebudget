@@ -213,6 +213,9 @@ class PayStream:
     recent: list[tuple[date, int]] = field(default_factory=list)  # newest first
     low_cents: int = 0
     high_cents: int = 0
+    # Set when the dates come from a schedule you declared rather than from
+    # walking the fortnight forward off the last payslip.
+    declared_dates: list[date] | None = None
 
     @property
     def varies(self) -> bool:
@@ -233,6 +236,8 @@ class PayStream:
 
     def paydays_in(self, month: str) -> list[date]:
         """Which days of `month` this stream is expected to pay on."""
+        if self.declared_dates is not None:
+            return self.declared_dates
         year, mon = int(month[:4]), int(month[5:7])
         last_day = calendar.monthrange(year, mon)[1]
         first, last = date(year, mon, 1), date(year, mon, last_day)
@@ -345,7 +350,22 @@ def pay_streams(conn, month: str, lookback: int = 9) -> list[PayStream]:
 
 def expected_income(conn, month: str, today: date | None = None) -> dict:
     """What recurring income should total this month, given when it lands."""
-    streams = pay_streams(conn, month)
+    from . import schedules as sched
+
+    # A declared income schedule replaces the detected stream for that
+    # category. Cadence read off a statement is a good guess and no more, and
+    # guessing wrong is exactly the "third payday that isn't" problem.
+    declared = [s for s in sched.all_schedules(conn)
+                if s.kind == "income" and s.amount_cents]
+    claimed = {s.category for s in declared}
+    streams = [s for s in pay_streams(conn, month) if s.category not in claimed]
+    for s in declared:
+        streams.append(PayStream(
+            name=s.category, category=s.category, cadence=s.cadence,
+            typical_cents=s.amount_cents, last_date=s.anchor, days_of_month=[],
+            recent=[], low_cents=s.amount_cents, high_cents=s.amount_cents,
+            declared_dates=s.dates_in(month)))
+
     detail = []
     total = low = high = 0
     for stream in streams:
@@ -582,6 +602,7 @@ class PeriodicBill:
     last_date: date
     next_due: date
     times_seen: int
+    declared: bool = False      # you said so, rather than the app working it out
 
     @property
     def monthly_cents(self) -> int:
@@ -601,7 +622,31 @@ def _median_int(values: list[int]) -> int:
     return ordered[len(ordered) // 2] if ordered else 0
 
 
-def periodic_bills(conn, month: str, lookback: int = 24) -> list[PeriodicBill]:
+def _declared_bills(conn, today: date) -> list[PeriodicBill]:
+    """Schedules you set yourself, as bills. These need no evidence at all —
+    you said so — which is the point: a quarterly bill is a quarterly bill from
+    the first statement, not from the third."""
+    from . import schedules as sched
+    out = []
+    for s in sched.all_schedules(conn):
+        if s.kind != "expense" or not s.is_periodic or not s.amount_cents:
+            continue
+        last = s.next_after(today - timedelta(days=400))
+        while True:
+            following = s.next_after(last)
+            if following > today:
+                break
+            last = following
+        out.append(PeriodicBill(
+            merchant=s.category, category=s.category, category_id=s.category_id,
+            cadence=s.label, months_per=sched.months_per(s.cadence),
+            typical_cents=s.amount_cents, last_date=last,
+            next_due=s.next_after(today), times_seen=0, declared=True))
+    return out
+
+
+def periodic_bills(conn, month: str, lookback: int = 24,
+                   today: date | None = None) -> list[PeriodicBill]:
     """Recurring charges whose interval is longer than a month.
 
     Two sightings are enough for the long cadences and three for the short
@@ -625,8 +670,14 @@ def periodic_bills(conn, month: str, lookback: int = 24) -> list[PeriodicBill]:
         if r["merchant"]:
             grouped.setdefault(r["merchant"], []).append(r)
 
-    out: list[PeriodicBill] = []
+    # What you declared wins outright, and suppresses guessing inside the same
+    # category — otherwise saying "Water is quarterly" leaves the app still
+    # arguing about the water company.
+    out: list[PeriodicBill] = _declared_bills(conn, today or date.today())
+    declared_cats = {b.category_id for b in out}
     for merchant, charges in grouped.items():
+        if charges[-1]["category_id"] in declared_cats:
+            continue
         # One bill per day: a payment split into two lines is still one bill,
         # and counting it twice would halve the apparent interval.
         per_day: dict[date, int] = {}
@@ -754,9 +805,10 @@ def budget_review(conn, month: str) -> list[BudgetNote]:
         past = [months_seen.get(m, 0) for m in window if m != month]
         typical = _median_int([v for v in past if v > 0]) if any(past) else 0
 
-        # Only a bill that is most of the category speaks for it.
+        # Only a bill that is most of the category speaks for it — unless you
+        # said so yourself, in which case it is not the app's call to overrule.
         bill = bills.get(cat_id)
-        if bill is not None:
+        if bill is not None and not bill.declared:
             per_month = sum(months_seen.get(m, 0) for m in window) / len(window)
             if per_month and bill.monthly_cents < per_month * BILL_DOMINATES:
                 bill = None

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% from "_macros.html" import category_select with context %}
+{% block title %}Plan{% endblock %}
+{% block content %}
+
+<h1 style="font-size:20px; margin:4px 0 2px">Plan</h1>
+<p class="small muted">Everything else on the site works cadence out from your
+statements, which is a good guess and never a certainty — pay every other week
+reads as "sometimes three paydays", and a quarterly bill is invisible until it
+has been paid three times. Anything you set here is taken as fact instead, and
+the guessing stops for that category.</p>
+
+{% if declared %}
+<div class="card">
+  <h2>What you've told it</h2>
+  {% for s in declared %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ s.category }}
+        <span class="chip">{{ s.label }}</span>
+        {%- if s.kind == 'income' %} <span class="chip">income</span>{% endif %}</div>
+      <div class="meta">
+        {%- if s.amount_cents %}{{ currency }}{{ s.amount_cents|money }} a time ·
+        {{ currency }}{{ s.monthly_cents|money }} a month{% else %}no amount set{% endif %}
+        · next {{ s.next_after(today_date)|day_month_year }}
+        {%- if s.note %} · {{ s.note }}{% endif %}</div>
+    </div>
+    <div class="amt">
+      <a class="btn small ghost" href="/plan?category={{ s.category_id }}">Edit</a>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if suggestions %}
+<div class="card">
+  <h2>Found in your statements</h2>
+  <p class="small muted">These are the app's own guesses. Confirming one turns
+  it into a fact; if a figure is wrong, fix it here and it stops being guessed.</p>
+  {% for g in suggestions %}
+  <form method="post" action="/plan/save" class="txn" style="align-items:center">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="category_id" value="{{ g.category_id }}">
+    <input type="hidden" name="cadence" value="{{ g.cadence }}">
+    <input type="hidden" name="amount" value="{{ g.amount_cents|money_plain }}">
+    <input type="hidden" name="anchor_date" value="{{ g.anchor }}">
+    <div class="mid">
+      <div class="desc">{{ g.category }} <span class="chip">{{ cadences[g.cadence][0] }}</span></div>
+      <div class="meta">{{ g.what }} · {{ currency }}{{ g.amount_cents|money }} a time · {{ g.why }}</div>
+    </div>
+    <button class="btn small" type="submit">Confirm</button>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>{{ 'Change' if editing else 'Add' }} a schedule</h2>
+  <form method="post" action="/plan/save">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="f">Category</label>
+    {{ category_select('category_id', categories,
+                       selected=editing.category_id if editing else preset_category,
+                       include_blank=False) }}
+
+    <label class="f">How often</label>
+    <select name="cadence">
+      {% for key, spec in cadences.items() %}
+      <option value="{{ key }}"{% if editing and editing.cadence == key %} selected{% endif %}>{{ spec[0] }}</option>
+      {% endfor %}
+    </select>
+
+    <label class="f">How much each time</label>
+    <input type="text" inputmode="decimal" name="amount" placeholder="0"
+           value="{{ editing.amount_cents|money_plain if editing else '' }}">
+    <p class="small muted">Per occurrence, not per month — the amount on the
+    bill or the payslip. The monthly figure is worked out from the cadence.</p>
+
+    <label class="f">A date it lands on</label>
+    <input type="date" name="anchor_date"
+           value="{{ editing.anchor.isoformat() if editing else today }}">
+    <p class="small muted">Any one occurrence — the rest are counted from it.
+    For pay every two weeks, the date of a payday you can see on a statement.</p>
+
+    <label class="f">Note (optional)</label>
+    <input type="text" name="note" value="{{ editing.note if editing else '' }}">
+
+    <div class="actions">
+      <button class="btn" type="submit">Save schedule</button>
+      {% if editing %}
+      <a class="btn ghost" href="/plan">Cancel</a>
+      {% endif %}
+    </div>
+  </form>
+  {% if editing %}
+  <form method="post" action="/plan/remove" style="margin-top:10px"
+        data-confirm="Stop treating {{ editing.category }} as scheduled?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="category_id" value="{{ editing.category_id }}">
+    <button class="btn danger block" type="submit">Remove this schedule —
+      go back to working it out from statements</button>
+  </form>
+  {% endif %}
+</div>
+
+<p class="footer-note">A schedule changes what's expected, not what happened.
+Your statements are still the record of what actually left the account.</p>
+
+{% endblock %}

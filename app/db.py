@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA = """
 CREATE TABLE users (
@@ -163,6 +163,19 @@ CREATE TABLE settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+-- What you have told the app about a category, rather than what it guessed.
+-- A mortgage on the 1st, pay every other Friday, water every quarter: the app
+-- can infer these from enough statements, but only you know them for certain,
+-- and a wrong guess shows up as a category swinging for no reason.
+CREATE TABLE schedules (
+    category_id  INTEGER PRIMARY KEY REFERENCES categories(id) ON DELETE CASCADE,
+    cadence      TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL DEFAULT 0,   -- per occurrence, not per month
+    anchor_date  TEXT NOT NULL,                -- one date it lands on
+    note         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
@@ -232,6 +245,16 @@ MIGRATIONS: list[tuple[int, str]] = [
     """),
     (5, """
     CREATE INDEX IF NOT EXISTS idx_txn_rule ON transactions(rule_id);
+    """),
+    (6, """
+    CREATE TABLE IF NOT EXISTS schedules (
+        category_id  INTEGER PRIMARY KEY REFERENCES categories(id) ON DELETE CASCADE,
+        cadence      TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        anchor_date  TEXT NOT NULL,
+        note         TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL
+    );
     """),
 ]
 

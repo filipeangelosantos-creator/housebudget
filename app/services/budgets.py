@@ -36,6 +36,21 @@ def set_budget(conn, category_id: int, month: str, amount_cents: int) -> None:
             (category_id, month, amount_cents))
 
 
+def set_budget_onward(conn, category_id: int, month: str, amount_cents: int) -> int:
+    """Set this month's figure and let every later month follow it.
+
+    Carry-forward already means a month with no figure of its own follows the
+    last one set, so applying a change forward is a matter of clearing the
+    later figures that would override it — not of writing the same number into
+    twelve months and having to do it again next year. Returns how many months
+    were holding their own figure and now inherit this one.
+    """
+    set_budget(conn, category_id, month, amount_cents)
+    cur = conn.execute("DELETE FROM budgets WHERE category_id = ? AND month > ?",
+                       (category_id, month))
+    return cur.rowcount
+
+
 def copy_budgets(conn, from_month: str, to_month: str) -> int:
     """Put one month's budget into another. Returns how many categories moved.
 

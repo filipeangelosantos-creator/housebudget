@@ -33,6 +33,12 @@
 {% endif %}
 
 {# --- What the budget needs from you ------------------------------------- #}
+{% if applied_label %}
+<div class="banner"><div class="grow">Budget saved for
+  <strong>{{ applied_label }}</strong>. <a href="/budgets?month={{ month }}">See the
+  whole budget</a>.</div></div>
+{% endif %}
+
 {% if review %}
 <div class="card">
   <h2>Budget check</h2>
@@ -66,11 +72,27 @@
       {%- else %}{{ currency }}{{ n.suggested|money }}<span class="small muted">/mo</span>
       {%- endif %}</div>
   </div>
+  {# Acting on it here, rather than reading a figure, agreeing with it and
+     then retyping it on another page. #}
+  <form method="post" action="/budgets/apply" class="note-act">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="category_id" value="{{ n.category_id }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <input type="hidden" name="amount" value="{{ n.suggested|money_plain }}">
+    <input type="hidden" name="back" value="/insights?month={{ month }}">
+    <button class="btn small" type="submit">Budget {{ currency }}{{ n.suggested|money }}</button>
+    <select name="scope" aria-label="How far this applies">
+      <option value="onward">from {{ month_label }} on</option>
+      <option value="month">for {{ month_label }} only</option>
+    </select>
+    <a class="small" href="/plan?category={{ n.category_id }}&month={{ month }}">
+      {{ 'Change the schedule' if n.kind == 'periodic' else "Doesn't happen monthly?" }}</a>
+  </form>
   {% endfor %}
   <p class="small muted">Tap a row for the transactions behind it, or
-    <a href="/budgets?month={{ month }}">open the budget</a> to change the figures.
-    "{{ currency }}…/mo" is what that category would need each month, from what
-    you actually spend.</p>
+    <a href="/budgets?month={{ month }}">open the budget</a> to change everything at
+    once. "{{ currency }}…/mo" is what that category would need each month, from
+    what you actually spend — for the scheduled ones, what to set aside.</p>
 </div>
 {% endif %}
 

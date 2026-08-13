@@ -278,6 +278,12 @@ svg [data-drill-kind][aria-expanded="true"] {
 .balance { margin-top: 0; }
 .bill-hint { color: var(--ink-2); }
 .review-note .amt { white-space: nowrap; }
+.note-act { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+            padding: 0 0 12px; margin-top: -4px;
+            border-bottom: 1px solid var(--border); }
+.note-act select { width: auto; padding: 4px 8px; font-size: 13px; }
+.plan-link { font-size: 12px; }
+.save-scope select { margin-bottom: 4px; }
 
 /* --- forms -------------------------------------------------------------- */
 label.f { display: block; font-size: 13px; font-weight: 600; color: var(--ink-2);

@@ -42,16 +42,50 @@ def budgets_page(request: Request, conn=Depends(get_conn),
 @router.post("/budgets/save", dependencies=[Depends(verify_csrf)])
 async def budgets_save(request: Request, conn=Depends(get_conn),
                        user=Depends(current_user)):
+    """Save the month's figures, either for this month or from here on.
+
+    "From here on" doesn't write the number into future months — carry-forward
+    already makes an unset month follow the last one set, so it clears the
+    later figures that would override it instead.
+    """
     form = await request.form()
     m = clean_month(str(form.get("month", "")))
+    onward = str(form.get("scope", "")) == "onward"
     for key, value in form.items():
         if key.startswith("cat_"):
             cat_id = key[4:]
             if cat_id.isdigit():
-                budgets.set_budget(conn, int(cat_id), m,
-                                   abs(parse_money_input(str(value))))
+                cents = abs(parse_money_input(str(value)))
+                if onward:
+                    budgets.set_budget_onward(conn, int(cat_id), m, cents)
+                else:
+                    budgets.set_budget(conn, int(cat_id), m, cents)
     conn.commit()
     return RedirectResponse(f"/budgets?month={m}", status_code=303)
+
+
+@router.post("/budgets/apply", dependencies=[Depends(verify_csrf)])
+def budgets_apply(request: Request, conn=Depends(get_conn),
+                  user=Depends(current_user), category_id: int = Form(...),
+                  month: str = Form(...), amount: str = Form(""),
+                  scope: str = Form("onward"), back: str = Form("/insights")):
+    """Take one suggestion from the budget check and act on it.
+
+    A suggestion you can read but not act on is a chore, not an answer: you
+    were reading a figure, agreeing with it, and then retyping it somewhere
+    else.
+    """
+    m = clean_month(month)
+    cents = abs(parse_money_input(amount))
+    if scope == "onward":
+        budgets.set_budget_onward(conn, category_id, m, cents)
+    else:
+        budgets.set_budget(conn, category_id, m, cents)
+    conn.commit()
+    target = back if back.startswith("/") and not back.startswith("//") else "/insights"
+    joiner = "&" if "?" in target else "?"
+    return RedirectResponse(f"{target}{joiner}applied={category_id}",
+                            status_code=303)
 
 
 @router.post("/budgets/use-expected", dependencies=[Depends(verify_csrf)])
