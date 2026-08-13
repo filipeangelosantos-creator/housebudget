@@ -1,8 +1,13 @@
 """Things that behave differently on Windows and would only fail there."""
 import json
+import re
+from datetime import date
 from pathlib import Path
 
+import pytest
+
 from app import config, hostinfo
+from app.deps import day_month
 from app.services import importer
 
 
@@ -48,6 +53,33 @@ def test_lan_ip_never_raises_and_never_reports_loopback():
     ip = hostinfo.lan_ip()
     assert isinstance(ip, str)
     assert not ip.startswith("127.")
+
+
+# --- dates printed for people to read ----------------------------------------
+
+def test_a_date_reads_without_a_leading_zero():
+    assert day_month(date(2026, 8, 7)) == "7 Aug"
+    assert day_month(date(2026, 12, 21)) == "21 Dec"
+    assert day_month(date(2026, 1, 1)) == "1 Jan"
+
+
+def test_no_template_asks_the_c_library_for_a_day_without_a_zero():
+    """Regression: the budget page printed paydays with strftime('%-d %b').
+
+    '%-d' is a glibc extension — fine on Linux, ValueError on Windows, so the
+    whole page came back as Internal Server Error there and nowhere else. Any
+    test that only ever runs on Linux would miss it, so the guard is on the
+    source, not on the output. '%#d' is the same trap facing the other way.
+    """
+    repo = Path(__file__).resolve().parent.parent
+    bad = re.compile(r"%[-#][a-zA-Z]")
+    offenders = []
+    for path in list((repo / "app").rglob("*.html")) + list((repo / "app").rglob("*.py")):
+        for n, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if bad.search(line):
+                offenders.append(f"{path.name}:{n}: {line.strip()}")
+    assert not offenders, ("use the day_month filter instead of strftime: "
+                           + "; ".join(offenders))
 
 
 def test_launchers_exist_for_both_platforms():

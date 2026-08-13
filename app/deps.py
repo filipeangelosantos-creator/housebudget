@@ -28,9 +28,27 @@ def money_plain(cents) -> str:
     return "" if v == 0 else f"{v / 100:.2f}"
 
 
+MONTH_ABBR = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+              "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+
+def day_month(d) -> str:
+    """A date as '7 Aug'.
+
+    Built by hand rather than with strftime. The directive for a day with no
+    leading zero is a glibc extension: it prints "7" on Linux and raises
+    ValueError on Windows, so a page that renders fine here is an Internal
+    Server Error there. Month names are spelled out for the same reason %b
+    isn't used — it follows the machine's locale, and the rest of the app
+    names months in English.
+    """
+    return f"{d.day} {MONTH_ABBR[d.month - 1]}"
+
+
 templates.env.filters["money"] = money
 templates.env.filters["money_signed"] = money_signed
 templates.env.filters["money_plain"] = money_plain
+templates.env.filters["day_month"] = day_month
 
 
 def parse_money_input(text: str) -> int:

@@ -31,7 +31,7 @@ planned spending {{ currency }}{{ summary.expense_budget|money }} =
       <div class="desc">{{ entry.stream.name }}</div>
       <div class="meta">{{ entry.stream.cadence_label }} ·
         {{ entry.paydays|length }} payday{{ 's' if entry.paydays|length != 1 }} in
-        {{ month_label }} ({% for d in entry.paydays %}{{ d.strftime('%-d %b') }}{{ ', ' if not loop.last }}{% endfor %})</div>
+        {{ month_label }} ({% for d in entry.paydays %}{{ d|day_month }}{{ ', ' if not loop.last }}{% endfor %})</div>
     </div>
     <div class="amt">{{ '≈ ' if entry.stream.varies }}{{ currency }}{{ entry.expected|money }}</div>
   </div>
@@ -39,7 +39,7 @@ planned spending {{ currency }}{{ summary.expense_budget|money }} =
   <p class="small muted" style="margin:-4px 0 6px">
     The amount isn't the same each time — recent paydays were
     {% for d, cents in entry.stream.recent[:4] %}{{ currency }}{{ cents|money }}
-      ({{ d.strftime('%-d %b') }}){{ ', ' if not loop.last }}{% endfor %}.
+      ({{ d|day_month }}){{ ', ' if not loop.last }}{% endfor %}.
     So expect somewhere between {{ currency }}{{ entry.low|money }} and
     {{ currency }}{{ entry.high|money }} this month.</p>
   {% endif %}

@@ -282,6 +282,22 @@ def test_a_month_with_no_budget_anywhere_still_says_so(signed_in):
     assert "No budget set for August 2026" in r.text
 
 
+def test_the_budget_page_prints_the_paydays_it_expects(signed_in):
+    """Regression: the paydays were printed with strftime('%-d %b'). That is a
+    glibc extension — Linux renders "7 Aug" and Windows raises ValueError, so
+    the whole page was Internal Server Error there and only there. Empty
+    databases never reached the line, which is why it went unnoticed."""
+    from app import config, db
+    conn = db.connect(config.DB_PATH)
+    payroll(conn, biweekly_dates(date(2026, 5, 1), 8))     # last is 2026-08-07
+    conn.close()
+
+    r = signed_in.get("/budgets?month=2026-08")
+    assert r.status_code == 200
+    assert "Income timing" in r.text
+    assert "7 Aug, 21 Aug" in r.text
+
+
 def test_a_months_own_budget_is_not_called_carried_forward(signed_in):
     from app import config, db
     conn = db.connect(config.DB_PATH)

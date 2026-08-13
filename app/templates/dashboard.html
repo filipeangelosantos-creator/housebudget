@@ -36,7 +36,7 @@
 {% if income.upcoming %}
 <p class="small muted" style="margin-top:-2px">
   {{ income.upcoming|length }} more payday{{ 's' if income.upcoming|length != 1 }} to
-  come this month ({% for d in income.upcoming %}{{ d.strftime('%-d %b') }}{{ ', ' if not loop.last }}{% endfor %}) —
+  come this month ({% for d in income.upcoming %}{{ d|day_month }}{{ ', ' if not loop.last }}{% endfor %}) —
   {% if income.varies %}expecting roughly {{ currency }}{{ income.total|money }} in total,
   somewhere between {{ currency }}{{ income.low|money }} and {{ currency }}{{ income.high|money }}
   depending on the pay.{% else %}expecting {{ currency }}{{ income.total|money }} in total.{% endif %}
