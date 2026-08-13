@@ -14,8 +14,12 @@ router = APIRouter()
 
 
 def _accounts(conn):
+    # Transaction counts make two same-named accounts distinguishable in the
+    # picker, which is otherwise the one place a duplicate is invisible.
     return conn.execute(
-        "SELECT id, name, type FROM accounts WHERE archived = 0 ORDER BY name").fetchall()
+        "SELECT a.id, a.name, a.type, COUNT(t.id) AS txn_count "
+        "FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id "
+        "WHERE a.archived = 0 GROUP BY a.id ORDER BY a.name, a.id").fetchall()
 
 
 @router.get("/import")

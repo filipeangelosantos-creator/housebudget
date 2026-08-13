@@ -11,22 +11,31 @@
 {% set others = rows|rejectattr('archived')|list %}
 {% for a in rows %}
 <div class="card">
-  <div class="spread">
-    <form method="post" action="/accounts/{{ a.id }}/update" class="form-row"
-          style="flex:1; gap:6px">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <input type="text" name="name" value="{{ a.name }}" style="min-width:0">
-      <button class="btn small ghost" type="submit" name="action" value="rename"
-              style="flex:0 0 auto">Rename</button>
-    </form>
-  </div>
+  <form method="post" action="/accounts/{{ a.id }}/update">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <div class="form-row" style="gap:6px">
+      <input type="text" name="name" value="{{ a.name }}" style="min-width:0"
+             aria-label="Account name">
+      <select name="type" style="flex:0 0 130px" aria-label="Account type">
+        {% for t in types %}
+        <option value="{{ t }}" {{ 'selected' if a.type == t }}>
+          {{ {'checking':'Checking','savings':'Savings','credit':'Credit card',
+              'cash':'Cash','other':'Other'}[t] }}</option>
+        {% endfor %}
+      </select>
+      <button class="btn small ghost" type="submit" style="flex:0 0 auto">Save</button>
+    </div>
+  </form>
   <div class="small muted" style="margin:6px 0">
-    <span class="chip">{{ a.type }}</span>
     {{ a.txn_count }} transaction{{ 's' if a.txn_count != 1 }}
     {% if a.last_txn %}· up to {{ a.last_txn }}{% endif %}
     {% if a.archived %}· <span class="chip">archived</span>{% endif %}
     {% if a.id in duplicates %}· <span class="chip uncat">duplicate name</span>{% endif %}
   </div>
+  {% if a.type == 'credit' %}
+  <p class="small muted" style="margin:0 0 6px">Credit card: the import preview will
+  offer to flip signs so charges count as spending.</p>
+  {% endif %}
 
   <div class="actions" style="margin-top:6px">
     <form method="post" action="/accounts/{{ a.id }}/update" style="flex:0 0 auto">

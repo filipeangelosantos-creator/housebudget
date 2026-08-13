@@ -23,4 +23,24 @@ def conn():
     c.close()
 
 
+@pytest.fixture()
+def web(tmp_path, monkeypatch):
+    """A signed-out TestClient with a database of its own.
+
+    Web tests that create users would otherwise leak into other modules — the
+    first-run setup flow can only be exercised against an empty database.
+    """
+    from fastapi.testclient import TestClient
+
+    from app import config as cfg
+    from app.main import app
+
+    monkeypatch.setattr(cfg, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(cfg, "UPLOADS_DIR", tmp_path / "uploads")
+    monkeypatch.setattr(cfg, "PENDING_DIR", tmp_path / "uploads" / "pending")
+    monkeypatch.setattr(cfg, "DB_PATH", tmp_path / "budget.db")
+    with TestClient(app) as client:      # startup creates and seeds it
+        yield client
+
+
 SAMPLES = Path(__file__).resolve().parent.parent / "samples"

@@ -106,6 +106,47 @@ def test_merged_transactions_still_dedupe_on_reimport(conn):
     assert again.added == 0 and again.duplicates == 14
 
 
+def test_account_type_is_editable_through_the_page(web):
+    """An account created as checking that is really a card must be fixable —
+    the type decides whether the import offers the credit-card sign check."""
+    import re
+
+    from app import config, db
+
+    def account(name="Citizens Master"):
+        c = db.connect(config.DB_PATH)
+        try:
+            return c.execute("SELECT id, name, type FROM accounts WHERE name = ?",
+                             (name,)).fetchone()
+        finally:
+            c.close()
+
+    r = web.post("/setup", data={"username": "tester", "password": "password12",
+                                 "password2": "password12"})
+    assert r.url.path == "/", "setup did not sign us in"
+    r = web.get("/accounts")
+    csrf = re.search(r'name="csrf" value="([^"]+)"', r.text).group(1)
+    web.post("/accounts/add", data={"csrf": csrf, "name": "Citizens Master",
+                                    "type": "checking"})
+    acct = account()
+    assert acct["type"] == "checking"
+
+    r = web.post(f"/accounts/{acct['id']}/update",
+                 data={"csrf": csrf, "name": "Citizens Master", "type": "credit"})
+    assert "credit" in r.text
+    assert account()["type"] == "credit"
+
+    # renaming and retyping in one save
+    web.post(f"/accounts/{acct['id']}/update",
+             data={"csrf": csrf, "name": "Citizens Mastercard", "type": "credit"})
+    assert account("Citizens Mastercard")["type"] == "credit"
+
+    # a bogus type is ignored rather than stored
+    web.post(f"/accounts/{acct['id']}/update",
+             data={"csrf": csrf, "name": "Citizens Mastercard", "type": "nonsense"})
+    assert account("Citizens Mastercard")["type"] == "credit"
+
+
 def test_merge_into_itself_is_refused(conn):
     acct = make_account(conn, "Card")
     with pytest.raises(accounts.AccountError, match="different account"):

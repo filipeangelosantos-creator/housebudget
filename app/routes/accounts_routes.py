@@ -72,12 +72,20 @@ def account_add(request: Request, conn=Depends(get_conn), user=Depends(current_u
 @router.post("/accounts/{account_id}/update", dependencies=[Depends(verify_csrf)])
 def account_update(account_id: int, request: Request, conn=Depends(get_conn),
                    user=Depends(current_user), name: str = Form(""),
-                   action: str = Form("rename")):
-    if action == "rename" and name.strip():
-        conn.execute("UPDATE accounts SET name = ? WHERE id = ?",
-                     (name.strip(), account_id))
-    elif action == "toggle_archived":
+                   type: str = Form(""), action: str = Form("save")):
+    if action == "toggle_archived":
         conn.execute("UPDATE accounts SET archived = 1 - archived WHERE id = ?",
                      (account_id,))
+        conn.commit()
+        return RedirectResponse("/accounts", status_code=303)
+
+    # Type is editable: an account created as "checking" that is really a card
+    # otherwise never gets the credit-card sign check at import.
+    if name.strip():
+        conn.execute("UPDATE accounts SET name = ? WHERE id = ?",
+                     (name.strip(), account_id))
+    if type in ACCOUNT_TYPES:
+        conn.execute("UPDATE accounts SET type = ? WHERE id = ?",
+                     (type, account_id))
     conn.commit()
-    return RedirectResponse("/accounts", status_code=303)
+    return RedirectResponse("/accounts?m=Saved.", status_code=303)
