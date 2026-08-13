@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Imported{% endblock %}
+{% block content %}
+
+<h1>Import complete</h1>
+<p class="small muted">{{ results|length }} file{{ 's' if results|length != 1 }} imported{% if skipped %},
+{{ skipped|length }} skipped{% endif %}.</p>
+
+<div class="card">
+  <table class="tbl">
+    <tr><td>Added</td><td class="num"><strong>{{ totals.added }}</strong></td></tr>
+    <tr><td>Auto-categorized</td><td class="num">{{ totals.categorized }}</td></tr>
+    <tr><td>Duplicates skipped</td><td class="num">{{ totals.duplicates }}</td></tr>
+    {% if totals.to_confirm %}<tr><td>Worth confirming or splitting</td><td class="num">{{ totals.to_confirm }}</td></tr>{% endif %}
+    {% if totals.failed %}<tr><td>Unreadable rows</td><td class="num">{{ totals.failed }}</td></tr>{% endif %}
+    {% if linked %}<tr><td>Transfers matched to their other side</td><td class="num">{{ linked }}</td></tr>{% endif %}
+  </table>
+</div>
+
+<div class="card">
+  <h2>Per file</h2>
+  <div class="tbl-scroll">
+    <table class="tbl">
+      <tr><th>File</th><th class="num">Added</th><th class="num">Dup</th></tr>
+      {% for r in results %}
+      <tr><td>{{ r.filename }}</td><td class="num">{{ r.added }}</td>
+        <td class="num">{{ r.duplicates }}</td></tr>
+      {% endfor %}
+      {% for s in skipped %}
+      <tr><td>{{ s.filename }}</td><td colspan="2" class="small muted">{{ s.reason }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+{% if transfer_suggestions > 0 %}
+<a class="btn ghost block" href="/transfers" style="margin-bottom:10px">
+  Check {{ transfer_suggestions }} possible transfer{{ 's' if transfer_suggestions != 1 }} ›</a>
+{% endif %}
+
+{% if uncat > 0 or to_confirm > 0 %}
+<a class="btn block" href="/review">
+  {% if uncat > 0 and to_confirm > 0 %}Review {{ uncat }} uncategorized + {{ to_confirm }} to confirm ›
+  {% elif uncat > 0 %}Review {{ uncat }} uncategorized ›
+  {% else %}Confirm {{ to_confirm }} multi-category charge{{ 's' if to_confirm != 1 }} ›{% endif %}
+</a>
+<p></p>
+{% endif %}
+<div class="actions">
+  <a class="btn ghost" href="/import">Import more</a>
+  <a class="btn ghost" href="/">Dashboard</a>
+</div>
+
+{% endblock %}

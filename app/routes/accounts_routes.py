@@ -4,6 +4,7 @@ from fastapi.responses import RedirectResponse
 
 from ..db import utcnow
 from ..deps import current_user, get_conn, render, verify_csrf
+from ..services import accounts as accounts_svc
 
 router = APIRouter()
 
@@ -17,7 +18,44 @@ def accounts_page(request: Request, conn=Depends(get_conn),
         "SELECT a.*, COUNT(t.id) AS txn_count, MAX(t.date) AS last_txn "
         "FROM accounts a LEFT JOIN transactions t ON t.account_id = a.id "
         "GROUP BY a.id ORDER BY a.archived, a.name").fetchall()
-    return render(request, conn, "accounts.html", rows=rows, types=ACCOUNT_TYPES)
+    # Same-name accounts are almost always an accidental duplicate.
+    name_counts = {}
+    for r in rows:
+        key = r["name"].strip().lower()
+        name_counts[key] = name_counts.get(key, 0) + 1
+    duplicates = {r["id"] for r in rows if name_counts[r["name"].strip().lower()] > 1}
+    return render(request, conn, "accounts.html", rows=rows, types=ACCOUNT_TYPES,
+                  duplicates=duplicates,
+                  message=request.query_params.get("m", ""),
+                  error=request.query_params.get("e", ""))
+
+
+@router.post("/accounts/{account_id}/delete", dependencies=[Depends(verify_csrf)])
+def account_delete(account_id: int, request: Request, conn=Depends(get_conn),
+                   user=Depends(current_user)):
+    from urllib.parse import quote
+    try:
+        accounts_svc.delete_account(conn, account_id)
+    except accounts_svc.AccountError as e:
+        return RedirectResponse(f"/accounts?e={quote(str(e))}", status_code=303)
+    return RedirectResponse("/accounts?m=Account+deleted.", status_code=303)
+
+
+@router.post("/accounts/{account_id}/merge", dependencies=[Depends(verify_csrf)])
+def account_merge(account_id: int, request: Request, conn=Depends(get_conn),
+                  user=Depends(current_user), target_id: str = Form("")):
+    from urllib.parse import quote
+    if not target_id.isdigit():
+        return RedirectResponse("/accounts?e=Pick+an+account+to+merge+into.",
+                                status_code=303)
+    try:
+        result = accounts_svc.merge_accounts(conn, account_id, int(target_id))
+    except accounts_svc.AccountError as e:
+        return RedirectResponse(f"/accounts?e={quote(str(e))}", status_code=303)
+    msg = f"Merged: {result['moved']} transactions moved"
+    if result["duplicates_removed"]:
+        msg += f", {result['duplicates_removed']} duplicates removed"
+    return RedirectResponse(f"/accounts?m={quote(msg + '.')}", status_code=303)
 
 
 @router.post("/accounts/add", dependencies=[Depends(verify_csrf)])

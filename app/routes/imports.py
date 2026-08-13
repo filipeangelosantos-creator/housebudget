@@ -1,5 +1,6 @@
 """Statement upload → mapping preview → commit, plus import history/undo."""
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, UploadFile
+from fastapi import (APIRouter, Depends, File, Form, HTTPException, Request,
+                     UploadFile)
 from fastapi.responses import RedirectResponse
 
 from .. import config
@@ -56,7 +57,8 @@ def _column_options(stmt) -> list[dict]:
 
 
 def _render_preview(request, conn, token: str, filename: str, account_id: int,
-                    stmt, saved_profile: bool):
+                    stmt, saved_profile: bool, batch: str = "",
+                    batch_pos: int = 0, batch_total: int = 0):
     stats = importer.preview_stats(conn, account_id, stmt.parsed)
     sample = [r for r in stmt.parsed if not r.error][:12]
     errors = [r for r in stmt.parsed if r.error][:5]
@@ -75,42 +77,110 @@ def _render_preview(request, conn, token: str, filename: str, account_id: int,
                   columns=_column_options(stmt), stats=stats, sample=sample,
                   errors=errors, saved_profile=saved_profile,
                   suggest_flip=suggest_flip,
-                  is_pdf=filename.lower().endswith(".pdf"))
+                  is_pdf=filename.lower().endswith(".pdf"),
+                  batch=batch, batch_pos=batch_pos, batch_total=batch_total)
 
 
 @router.post("/import/upload", dependencies=[Depends(verify_csrf)])
 async def import_upload(request: Request, conn=Depends(get_conn),
-                        user=Depends(current_user), file: UploadFile = None,
+                        user=Depends(current_user),
+                        files: list[UploadFile] = File(default=None),
                         account_id: str = Form(...),
                         new_account_name: str = Form(""),
                         new_account_type: str = Form("checking")):
-    if file is None or not file.filename:
+    uploads = [f for f in (files or []) if f is not None and f.filename]
+    if not uploads:
         return render(request, conn, "import_upload.html", accounts=_accounts(conn),
                       supported=", ".join(SUPPORTED_EXTENSIONS),
-                      error="Choose a statement file to upload.")
-    data = await file.read()
-    if len(data) > config.MAX_UPLOAD_BYTES:
-        limit_mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
-        return render(request, conn, "import_upload.html", accounts=_accounts(conn),
-                      supported=", ".join(SUPPORTED_EXTENSIONS),
-                      error=f"File is too large ({limit_mb} MB max).")
+                      error="Choose one or more statement files to upload.")
+
+    limit_mb = config.MAX_UPLOAD_BYTES // (1024 * 1024)
+    collected: list[tuple[str, bytes]] = []
+    for upload in uploads:
+        data = await upload.read()
+        if len(data) > config.MAX_UPLOAD_BYTES:
+            return render(request, conn, "import_upload.html",
+                          accounts=_accounts(conn),
+                          supported=", ".join(SUPPORTED_EXTENSIONS),
+                          error=f"“{upload.filename}” is too large ({limit_mb} MB max).")
+        collected.append((upload.filename, data))
+
     acct_id = _resolve_account(conn, account_id, new_account_name, new_account_type)
+    # Oldest statement first, so running balances and transfer pairing see the
+    # months in order.
+    collected.sort(key=lambda f: f[0].lower())
+    batch = importer.stash_batch(collected, acct_id) if len(collected) > 1 else None
+    if batch:
+        return _preview_batch_item(request, conn, batch)
+
+    filename, data = collected[0]
     try:
-        stmt = load_statement(file.filename, data)
+        stmt = load_statement(filename, data)
     except ValueError as e:
         return render(request, conn, "import_upload.html", accounts=_accounts(conn),
                       supported=", ".join(SUPPORTED_EXTENSIONS), error=str(e))
-
-    saved_profile = False
-    if stmt.kind == "table":
-        profile = importer.load_profile(conn, acct_id, stmt.header_sig)
-        if profile is not None:
-            profile.header_row = stmt.mapping.header_row  # position is file-specific
-            stmt = load_statement(file.filename, data, mapping=profile)
-            saved_profile = True
-    token = importer.stash_pending(file.filename, data, acct_id)
-    return _render_preview(request, conn, token, file.filename, acct_id, stmt,
+    stmt, saved_profile = _apply_saved_profile(conn, acct_id, filename, data, stmt)
+    token = importer.stash_pending(filename, data, acct_id)
+    return _render_preview(request, conn, token, filename, acct_id, stmt,
                            saved_profile)
+
+
+def _apply_saved_profile(conn, acct_id: int, filename: str, data: bytes, stmt):
+    """Reuse the column mapping confirmed for this bank's layout before."""
+    if stmt.kind != "table":
+        return stmt, False
+    profile = importer.load_profile(conn, acct_id, stmt.header_sig)
+    if profile is None:
+        return stmt, False
+    profile.header_row = stmt.mapping.header_row      # position is file-specific
+    return load_statement(filename, data, mapping=profile), True
+
+
+def _preview_batch_item(request: Request, conn, batch: str):
+    """Show the preview for the batch's current file, skipping unreadable ones."""
+    state = importer.load_batch(batch)
+    if state is None:
+        raise HTTPException(status_code=410,
+                            detail="Upload expired — please upload the files again.")
+    acct_id = state["account_id"]
+    while state["index"] < len(state["tokens"]):
+        token = state["tokens"][state["index"]]
+        pending = importer.load_pending(token)
+        if pending is None:
+            state["index"] += 1
+            continue
+        filename, data, _ = pending
+        try:
+            stmt = load_statement(filename, data)
+        except ValueError as e:
+            state["skipped"].append({"filename": filename, "reason": str(e)})
+            state["index"] += 1
+            importer.save_batch(batch, state)
+            continue
+        stmt, saved_profile = _apply_saved_profile(conn, acct_id, filename, data, stmt)
+        importer.save_batch(batch, state)
+        return _render_preview(request, conn, token, filename, acct_id, stmt,
+                               saved_profile, batch=batch,
+                               batch_pos=state["index"] + 1,
+                               batch_total=len(state["tokens"]))
+    return _finish_batch(request, conn, batch, state)
+
+
+def _finish_batch(request: Request, conn, batch: str, state: dict):
+    totals = {"added": 0, "duplicates": 0, "failed": 0, "categorized": 0,
+              "to_confirm": 0}
+    for entry in state["results"]:
+        for key in totals:
+            totals[key] += entry.get(key, 0)
+    importer.drop_batch(batch)
+    linked = transfers.auto_link(conn)
+    uncat = conn.execute(
+        "SELECT COUNT(*) FROM transactions WHERE category_id IS NULL").fetchone()[0]
+    return render(request, conn, "import_batch_result.html",
+                  totals=totals, results=state["results"],
+                  skipped=state["skipped"], uncat=uncat, linked=linked,
+                  transfer_suggestions=transfers.suggestion_count(conn),
+                  to_confirm=splits.pending_confirmation_count(conn))
 
 
 def _mapping_from_form(form) -> Mapping:
@@ -138,6 +208,7 @@ async def import_commit(request: Request, conn=Depends(get_conn),
                         user=Depends(current_user)):
     form = await request.form()
     token = str(form.get("token", ""))
+    batch = str(form.get("batch", ""))
     pending = importer.load_pending(token)
     if pending is None:
         raise HTTPException(status_code=410, detail="Upload expired — please upload the file again.")
@@ -152,15 +223,36 @@ async def import_commit(request: Request, conn=Depends(get_conn),
         stmt.mapping = mapping
         stmt.parsed = apply_mapping(stmt.rows, mapping)
 
+    state = importer.load_batch(batch) if batch else None
+
     if form.get("action") == "refresh":
         return _render_preview(request, conn, token, filename, account_id, stmt,
-                               saved_profile=False)
+                               saved_profile=False, batch=batch,
+                               batch_pos=(state["index"] + 1) if state else 0,
+                               batch_total=len(state["tokens"]) if state else 0)
+
+    if form.get("action") == "skip" and state is not None:
+        state["skipped"].append({"filename": filename, "reason": "skipped by you"})
+        state["index"] += 1
+        importer.save_batch(batch, state)
+        importer.drop_pending(token)
+        return _preview_batch_item(request, conn, batch)
 
     result = importer.commit_import(conn, account_id, filename, data, stmt.parsed,
                                     user["id"])
     if stmt.kind == "table":
         importer.save_profile(conn, account_id, stmt.header_sig, stmt.mapping)
     importer.drop_pending(token)
+
+    if state is not None:
+        state["results"].append({
+            "filename": filename, "added": result.added,
+            "duplicates": result.duplicates, "failed": result.failed,
+            "categorized": result.categorized, "to_confirm": result.to_confirm})
+        state["index"] += 1
+        importer.save_batch(batch, state)
+        return _preview_batch_item(request, conn, batch)
+
     # Now that both sides may be present, match up internal movements.
     linked = transfers.auto_link(conn)
     uncat = conn.execute(

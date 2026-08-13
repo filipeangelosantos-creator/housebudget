@@ -4,7 +4,13 @@
 {% block content %}
 
 <h1>Check before importing</h1>
-<p class="small muted">{{ filename }} → <strong>{{ account.name }}</strong></p>
+<p class="small muted">
+  {% if batch_total %}<strong>File {{ batch_pos }} of {{ batch_total }}</strong> ·
+  {% endif %}{{ filename }} → <strong>{{ account.name }}</strong></p>
+{% if batch_total %}
+<div class="track" style="margin-bottom:10px"><div class="fill ok"
+  style="width: {{ ((batch_pos - 1) * 100 / batch_total)|round|int }}%"></div></div>
+{% endif %}
 
 {% if saved_profile %}
 <div class="banner"><div class="grow">Recognized this bank's format from a previous import.</div></div>
@@ -34,6 +40,7 @@ below and refresh the preview.</div></div>
 <form method="post" action="/import/commit">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="token" value="{{ token }}">
+  <input type="hidden" name="batch" value="{{ batch }}">
 
   {% if kind == 'table' %}
   <input type="hidden" name="header_row" value="{{ mapping.header_row if mapping.header_row is not none else '' }}">
@@ -117,11 +124,18 @@ below and refresh the preview.</div></div>
   </div>
 
   <div class="actions">
+    {% if batch_total %}
+    <button class="btn ghost" type="submit" name="action" value="skip">Skip this file</button>
+    {% else %}
     <a class="btn ghost" href="/import">Cancel</a>
+    {% endif %}
     <button class="btn" type="submit" name="action" value="confirm"
       {% if stats.ok - stats.duplicates == 0 %}disabled{% endif %}>
       Import {{ stats.ok - stats.duplicates }} transaction{{ 's' if stats.ok - stats.duplicates != 1 }}</button>
   </div>
+  {% if batch_total and stats.ok - stats.duplicates == 0 %}
+  <p class="small muted" style="text-align:center">Nothing new here — skip to move on.</p>
+  {% endif %}
 </form>
 
 {% endblock %}

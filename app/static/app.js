@@ -51,12 +51,20 @@
     updateCount();
   }
 
-  // On the import form: show chosen file name.
+  // On the import form: show what was chosen.
   var file = document.querySelector('input[type="file"][data-show-name]');
   if (file) {
     file.addEventListener("change", function () {
       var out = document.getElementById("file-name-out");
-      if (out && file.files.length) out.textContent = file.files[0].name;
+      if (!out || !file.files.length) return;
+      if (file.files.length === 1) {
+        out.textContent = file.files[0].name;
+      } else {
+        var names = Array.prototype.map.call(file.files, function (f) {
+          return f.name;
+        });
+        out.textContent = file.files.length + " files: " + names.join(", ");
+      }
     });
   }
 

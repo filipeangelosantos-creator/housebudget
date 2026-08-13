@@ -5,29 +5,67 @@
 <h1>Accounts</h1>
 <p class="small muted">One entry per real bank account or card you'll import statements from.</p>
 
+{% if message %}<div class="msg-box">{{ message }}</div>{% endif %}
+{% if error %}<div class="error-box">{{ error }}</div>{% endif %}
+
+{% set others = rows|rejectattr('archived')|list %}
+{% for a in rows %}
 <div class="card">
-  {% for a in rows %}
-  <div class="txn">
-    <form method="post" action="/accounts/{{ a.id }}/update" class="mid form-row" style="gap:6px">
+  <div class="spread">
+    <form method="post" action="/accounts/{{ a.id }}/update" class="form-row"
+          style="flex:1; gap:6px">
       <input type="hidden" name="csrf" value="{{ csrf }}">
       <input type="text" name="name" value="{{ a.name }}" style="min-width:0">
-      <button class="btn small ghost" type="submit" name="action" value="rename" style="flex:0 0 auto">Rename</button>
-    </form>
-    <div class="small muted" style="flex-shrink:0">
-      <span class="chip">{{ a.type }}</span> {{ a.txn_count }} txns
-      {% if a.last_txn %}· to {{ a.last_txn }}{% endif %}
-      {% if a.archived %}· <span class="chip">archived</span>{% endif %}
-    </div>
-    <form method="post" action="/accounts/{{ a.id }}/update" style="flex-shrink:0">
-      <input type="hidden" name="csrf" value="{{ csrf }}">
-      <button class="btn small ghost" type="submit" name="action" value="toggle_archived">{{ 'Restore' if a.archived else 'Archive' }}</button>
+      <button class="btn small ghost" type="submit" name="action" value="rename"
+              style="flex:0 0 auto">Rename</button>
     </form>
   </div>
-  {% else %}
-  <p class="muted">No accounts yet — add your checking account and credit card below,
-  or create them on the fly when importing.</p>
-  {% endfor %}
+  <div class="small muted" style="margin:6px 0">
+    <span class="chip">{{ a.type }}</span>
+    {{ a.txn_count }} transaction{{ 's' if a.txn_count != 1 }}
+    {% if a.last_txn %}· up to {{ a.last_txn }}{% endif %}
+    {% if a.archived %}· <span class="chip">archived</span>{% endif %}
+    {% if a.id in duplicates %}· <span class="chip uncat">duplicate name</span>{% endif %}
+  </div>
+
+  <div class="actions" style="margin-top:6px">
+    <form method="post" action="/accounts/{{ a.id }}/update" style="flex:0 0 auto">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn small ghost" type="submit" name="action" value="toggle_archived">
+        {{ 'Restore' if a.archived else 'Archive' }}</button>
+    </form>
+    {% if a.txn_count == 0 %}
+    <form method="post" action="/accounts/{{ a.id }}/delete" style="flex:0 0 auto"
+          data-confirm="Delete “{{ a.name }}”? It has no transactions.">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <button class="btn small danger" type="submit">Delete</button>
+    </form>
+    {% endif %}
+  </div>
+
+  {% if a.txn_count > 0 and others|length > 1 %}
+  <details class="adv" {% if a.id in duplicates %}open{% endif %}>
+    <summary>Merge into another account…</summary>
+    <p class="small muted">Moves all {{ a.txn_count }} transactions across and deletes
+    “{{ a.name }}”. Anything the other account already has is dropped rather than
+    duplicated, so this is safe if you imported the same statement into both.</p>
+    <form method="post" action="/accounts/{{ a.id }}/merge" class="form-row"
+          data-confirm="Move {{ a.txn_count }} transactions out of “{{ a.name }}” and delete it?">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <select name="target_id">
+        {% for other in rows %}{% if other.id != a.id %}
+        <option value="{{ other.id }}">{{ other.name }} ({{ other.type }}, {{ other.txn_count }} txns)</option>
+        {% endif %}{% endfor %}
+      </select>
+      <button class="btn small" type="submit" style="flex:0 0 auto">Merge</button>
+    </form>
+  </details>
+  {% endif %}
 </div>
+{% else %}
+<div class="card"><p class="muted">No accounts yet — add your checking account and
+credit card below, or create them on the fly when importing.</p></div>
+{% endfor %}
 
 <div class="card">
   <h2>Add account</h2>

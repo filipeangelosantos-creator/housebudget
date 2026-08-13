@@ -47,7 +47,7 @@ def test_full_journey():
                             data={"csrf": csrf, "account_id": "new",
                                   "new_account_name": "Joint Checking",
                                   "new_account_type": "checking"},
-                            files={"file": ("sample-checking.csv", f, "text/csv")})
+                            files={"files": ("sample-checking.csv", f, "text/csv")})
         assert r.status_code == 200
         assert "Check before importing" in r.text
         token = re.search(r'name="token" value="([a-f0-9]+)"', r.text).group(1)
@@ -65,7 +65,7 @@ def test_full_journey():
         with open(SAMPLES / "sample-checking.csv", "rb") as f:
             r = client.post("/import/upload",
                             data={"csrf": get_csrf(r.text), "account_id": "1"},
-                            files={"file": ("sample-checking.csv", f, "text/csv")})
+                            files={"files": ("sample-checking.csv", f, "text/csv")})
         assert "Recognized this bank" in r.text  # saved import profile hit
         assert re.search(r"New transactions</td><td[^>]*><strong>0</strong>", r.text)
 
@@ -187,6 +187,56 @@ def test_full_journey():
         conn.close()
         assert left == 0
         assert nrules == 1
+
+        # Multiple files in one upload: previewed one at a time, then a
+        # combined summary. The second file overlaps the first on purpose.
+        r = client.get("/import")
+        csrf = get_csrf(r.text)
+        with open(SAMPLES / "sample-checking.csv", "rb") as f1, \
+                open(SAMPLES / "sample-visa.csv", "rb") as f2:
+            r = client.post("/import/upload",
+                            data={"csrf": csrf, "account_id": "new",
+                                  "new_account_name": "Batch Card",
+                                  "new_account_type": "credit"},
+                            files=[("files", ("a-checking.csv", f1, "text/csv")),
+                                   ("files", ("b-visa.csv", f2, "text/csv"))])
+        assert "File 1 of 2" in r.text
+        batch = re.search(r'name="batch" value="([a-f0-9]+)"', r.text).group(1)
+        token = re.search(r'name="token" value="([a-f0-9]+)"', r.text).group(1)
+        r = client.post("/import/commit", data={
+            "csrf": get_csrf(r.text), "token": token, "batch": batch,
+            "action": "confirm", "header_row": "0", "date_col": "0",
+            "desc_col1": "1", "amount_mode": "single", "amount_col": "2"})
+        # straight on to the next file, no return trip to the upload form
+        assert "File 2 of 2" in r.text
+        token2 = re.search(r'name="token" value="([a-f0-9]+)"', r.text).group(1)
+        assert token2 != token
+        r = client.post("/import/commit", data={
+            "csrf": get_csrf(r.text), "token": token2, "batch": batch,
+            "action": "confirm", "header_row": "0", "date_col": "0",
+            "desc_col1": "1", "amount_mode": "single", "amount_col": "2"})
+        assert "Import complete" in r.text
+        assert "2 files imported" in r.text
+        assert "a-checking.csv" in r.text and "b-visa.csv" in r.text
+
+        # Accounts: the duplicate can be merged away and nothing is doubled
+        r = client.get("/accounts")
+        assert "Merge into another account" in r.text
+        conn = db.connect(config.DB_PATH)
+        batch_acct = conn.execute(
+            "SELECT id FROM accounts WHERE name = 'Batch Card'").fetchone()["id"]
+        before = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        conn.close()
+        r = client.post(f"/accounts/{batch_acct}/merge",
+                        data={"csrf": get_csrf(r.text), "target_id": "1"})
+        assert "Merged" in r.text
+        conn = db.connect(config.DB_PATH)
+        after = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+        gone = conn.execute("SELECT COUNT(*) FROM accounts WHERE id = ?",
+                            (batch_acct,)).fetchone()[0]
+        conn.close()
+        assert gone == 0
+        assert after < before          # the overlapping checking rows collapsed
 
         # Every remaining page renders
         conn = db.connect(config.DB_PATH)

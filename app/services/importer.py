@@ -16,6 +16,19 @@ from ..parsing.csv_parser import Mapping, ParsedRow
 from . import classify, splits
 
 
+def dedupe_hash_for(account_id: int, date: str, amount_cents: int,
+                    normalized_desc: str, seq: int = 0,
+                    fitid: str | None = None) -> str:
+    """The identity a transaction has within an account. Shared with account
+    merging so a merged-in transaction is still recognised as a duplicate the
+    next time that statement is imported."""
+    if fitid:
+        src = f"{account_id}|fitid|{fitid}"
+    else:
+        src = f"{account_id}|{date}|{amount_cents}|{normalized_desc}|{seq}"
+    return hashlib.sha256(src.encode()).hexdigest()
+
+
 def dedupe_hashes(account_id: int, rows: list[ParsedRow]) -> list[str | None]:
     seen: dict[tuple, int] = {}
     hashes: list[str | None] = []
@@ -206,6 +219,42 @@ def load_pending(token: str) -> tuple[str, bytes, int] | None:
 def drop_pending(token: str) -> None:
     (config.PENDING_DIR / f"{token}.bin").unlink(missing_ok=True)
     (config.PENDING_DIR / f"{token}.json").unlink(missing_ok=True)
+
+
+# --- batches: several statements queued for one account ----------------------
+
+def stash_batch(files: list[tuple[str, bytes]], account_id: int) -> str:
+    """Queue several uploads; each is still previewed and confirmed in turn."""
+    config.ensure_dirs()
+    tokens = [stash_pending(name, data, account_id) for name, data in files]
+    batch = secrets.token_hex(16)
+    (config.PENDING_DIR / f"b{batch}.json").write_text(json.dumps({
+        "account_id": account_id, "tokens": tokens, "index": 0,
+        "names": [name for name, _ in files], "results": [], "skipped": []}),
+        encoding="utf-8")
+    return batch
+
+
+def load_batch(batch: str) -> dict | None:
+    if not batch.isalnum():
+        return None
+    path = config.PENDING_DIR / f"b{batch}.json"
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def save_batch(batch: str, state: dict) -> None:
+    (config.PENDING_DIR / f"b{batch}.json").write_text(
+        json.dumps(state), encoding="utf-8")
+
+
+def drop_batch(batch: str) -> None:
+    state = load_batch(batch)
+    if state:
+        for token in state.get("tokens", []):
+            drop_pending(token)
+    (config.PENDING_DIR / f"b{batch}.json").unlink(missing_ok=True)
 
 
 def _cleanup_pending(max_files: int = 40) -> None:
