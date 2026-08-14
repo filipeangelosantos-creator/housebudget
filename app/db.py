@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 SCHEMA = """
 CREATE TABLE users (
@@ -183,6 +183,18 @@ CREATE TABLE schedules (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX idx_schedules_category ON schedules(category_id);
+
+-- What an account was actually worth on a given day, as the bank shows it.
+-- Statements say what moved, never what is there now: the balance is the one
+-- fact an import cannot supply, and without it a forecast has no starting
+-- point. Signed as money you have, so a card you owe on is negative.
+CREATE TABLE account_balances (
+    account_id    INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    as_of         TEXT NOT NULL,
+    balance_cents INTEGER NOT NULL,
+    created_at    TEXT NOT NULL,
+    PRIMARY KEY (account_id, as_of)
+);
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
@@ -281,6 +293,15 @@ MIGRATIONS: list[tuple[int, str]] = [
         FROM schedules_v6;
     DROP TABLE schedules_v6;
     CREATE INDEX idx_schedules_category ON schedules(category_id);
+    """),
+    (8, """
+    CREATE TABLE IF NOT EXISTS account_balances (
+        account_id    INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        as_of         TEXT NOT NULL,
+        balance_cents INTEGER NOT NULL,
+        created_at    TEXT NOT NULL,
+        PRIMARY KEY (account_id, as_of)
+    );
     """),
 ]
 

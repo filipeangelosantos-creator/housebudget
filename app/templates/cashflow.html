@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% from "_macros.html" import amount, plain with context %}
+{% block title %}Cashflow{% endblock %}
+{% block content %}
+
+<h1 style="font-size:20px; margin:4px 0 2px">Cashflow</h1>
+<p class="small muted">A statement says what moved, never what is there now.
+Tell it what each account is worth today and the transactions carry that
+forward — then the schedules on <a href="/plan">your plan</a> carry it onward,
+so the question stops being "what did we spend" and starts being "does this
+last until payday".</p>
+
+{% if forecast.accounts_known %}
+<div class="bal-strip {{ 'neg' if forecast.goes_negative else 'pos' }}">
+  {%- if forecast.goes_negative %}Down to {{ plain(forecast.low_cents) }} on
+  {{ forecast.low_on|day_month_year }}
+  {%- else %}Lowest it gets is {{ plain(forecast.low_cents) }}, on
+  {{ forecast.low_on|day_month_year }}{% endif %}</div>
+
+<div class="card">
+  <div class="spread"><span class="small muted">On hand today</span>
+    <strong>{{ plain(forecast.start_cents) }}</strong></div>
+  <div class="spread"><span class="small muted">In {{ days }} days</span>
+    <strong>{{ plain(forecast.end_cents) }}</strong></div>
+  <p class="small muted" id="bal-note">
+    {%- if forecast.goes_negative %}The balance goes below zero before
+    {{ forecast.horizon_end|day_month_year }}. Everything scheduled between now
+    and then is listed below — the shortfall is a timing problem if a payday
+    lands just after it, and a real one if it doesn't.
+    {%- elif not scheduled %}Nothing is scheduled yet, so this is just today's
+    money sitting still. <a href="/plan">Add your pay and your bills</a> and
+    this becomes a forecast.
+    {%- else %}Measured against {{ scheduled }} scheduled
+    thing{{ 's' if scheduled != 1 }}.{% endif %}</p>
+  {% if forecast.accounts_missing %}
+  <p class="small muted">{{ forecast.accounts_missing }}
+    account{{ 's' if forecast.accounts_missing != 1 }} below
+    {{ "have" if forecast.accounts_missing != 1 else "has" }} no balance yet, so
+    {{ "they are" if forecast.accounts_missing != 1 else "it is" }} left out of
+    this entirely rather than counted as empty.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>What each account is worth</h2>
+  <form method="post" action="/cashflow/balances">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label class="f">As at</label>
+    <input type="date" name="as_of" value="{{ today }}">
+    <p class="small muted">The closing balance on that day. Anything imported
+    after it is added on top, so re-entering this every month is unnecessary —
+    do it again only when the two have drifted apart.</p>
+
+    {% for a in accounts %}
+    <div class="budget-edit-row">
+      <div class="nm">{{ a.name }}
+        <div class="hint">{{ a.type }}
+          {%- if a.known %} · you said {{ plain(a.stated_cents) }} on
+          {{ a.as_of|day_month_year }}
+          {%- if a.since_cents %} · {{ plain(a.since_cents) }} since, so
+          <strong>{{ plain(a.current_cents) }}</strong> now{% endif %}
+          {%- else %} · not known{% endif %}</div>
+      </div>
+      <input type="text" inputmode="decimal" name="bal_{{ a.account_id }}"
+             value="{{ a.stated_cents|money_plain if a.known else '' }}"
+             placeholder="not known">
+    </div>
+    {% endfor %}
+    <p class="small muted">What you have, so a card you owe on is a negative
+    number. Leave a box empty to leave that account out — "I don't know" and
+    "there is nothing in it" are different answers.</p>
+    <div class="actions"><button class="btn" type="submit">Save balances</button></div>
+  </form>
+</div>
+
+{% if forecast.events %}
+<div class="card">
+  <div class="spread">
+    <h2 style="margin:0">What's coming</h2>
+    <span class="small">{% for h in horizons %}<a href="/cashflow?days={{ h }}"
+      {% if h == days %}style="font-weight:700"{% endif %}>{{ h }}d</a>{{ ' · ' if not loop.last }}{% endfor %}</span>
+  </div>
+  <table class="tbl drill-tbl" style="margin-top:8px">
+    {% for e in forecast.events %}
+    <tr>
+      <td class="drill-date">{{ e.when|day_month }}</td>
+      <td>{{ e.label|truncate(40) }}
+        {%- if e.kind == 'imported' %} <span class="chip">already imported</span>{% endif %}</td>
+      <td class="num {{ 'pos' if e.amount_cents > 0 }}">{{ amount(e.amount_cents) }}</td>
+      <td class="num {{ 'neg' if e.balance_after < 0 }}">{{ plain(e.balance_after) }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  <p class="small muted">Only what you have declared is projected. A repeat the
+  app merely thinks it spotted is a guess, and a forecast built on guesses is
+  worse than no forecast — <a href="/plan">confirm one</a> and it appears here.</p>
+</div>
+{% elif forecast.accounts_known %}
+<div class="card"><p class="small muted">Nothing scheduled in the next
+  {{ days }} days. <a href="/plan">Set up your pay and bills</a> to see the
+  balance move.</p></div>
+{% endif %}
+
+{% endblock %}
