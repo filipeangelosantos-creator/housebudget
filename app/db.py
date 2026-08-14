@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 SCHEMA = """
 CREATE TABLE users (
@@ -195,6 +195,24 @@ CREATE TABLE account_balances (
     created_at    TEXT NOT NULL,
     PRIMARY KEY (account_id, as_of)
 );
+
+-- Money that is already spoken for. A savings balance climbing towards a card
+-- that has to be clear by a fixed date is not spare money, and a balance that
+-- doesn't say so invites spending it twice.
+--
+-- 'payoff' points at the account whose debt must reach zero, so the figure
+-- follows the real balance rather than a number typed once and forgotten.
+-- 'goal' is a sum you are putting aside for something not yet bought.
+CREATE TABLE commitments (
+    id           INTEGER PRIMARY KEY,
+    name         TEXT NOT NULL,
+    kind         TEXT NOT NULL CHECK (kind IN ('payoff','goal')),
+    account_id   INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+    target_cents INTEGER NOT NULL DEFAULT 0,    -- goal only
+    due_date     TEXT NOT NULL,
+    note         TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL
+);
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
@@ -301,6 +319,18 @@ MIGRATIONS: list[tuple[int, str]] = [
         balance_cents INTEGER NOT NULL,
         created_at    TEXT NOT NULL,
         PRIMARY KEY (account_id, as_of)
+    );
+    """),
+    (9, """
+    CREATE TABLE IF NOT EXISTS commitments (
+        id           INTEGER PRIMARY KEY,
+        name         TEXT NOT NULL,
+        kind         TEXT NOT NULL CHECK (kind IN ('payoff','goal')),
+        account_id   INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+        target_cents INTEGER NOT NULL DEFAULT 0,
+        due_date     TEXT NOT NULL,
+        note         TEXT NOT NULL DEFAULT '',
+        created_at   TEXT NOT NULL
     );
     """),
 ]

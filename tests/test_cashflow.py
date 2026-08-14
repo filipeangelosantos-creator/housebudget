@@ -324,3 +324,182 @@ def test_a_different_category_landing_nearby_does_not_suppress_anything(conn):
 
     f = cashflow.forecast(conn, days=25, today=date(2026, 8, 13))
     assert any(e.kind == "scheduled" for e in f.events)
+
+
+# --- money that is already spoken for -----------------------------------------
+
+from app.services import commitments  # noqa: E402
+
+
+def test_a_card_to_clear_by_a_date_says_what_that_costs_a_month(conn):
+    """The reported case: a card that has to be gone by Aug 2028, growing, while
+    savings grows beside it looking like spare money."""
+    account(conn, 1, "Savings", "savings")
+    account(conn, 2, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 1200000)
+    cashflow.set_balance(conn, 2, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=2)
+    conn.commit()
+
+    c = commitments.all_commitments(conn, today=date(2026, 8, 13))[0]
+    assert c.outstanding_cents == 1420000
+    assert c.months_left == 23                      # Aug 2026 to Aug 2028
+    assert c.per_month_cents == 61739
+
+
+def test_a_debt_is_not_taken_off_the_total_twice(conn):
+    """A card you owe on is already a negative balance, so the household total
+    has it. Subtracting the payoff again would double it."""
+    account(conn, 1, "Savings", "savings")
+    account(conn, 2, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 1200000)
+    cashflow.set_balance(conn, 2, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=2)
+    conn.commit()
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert p.on_hand_cents == -220000               # savings minus the card
+    assert p.committed_cents == 0                   # not counted a second time
+    assert p.free_cents == -220000
+
+
+def test_money_held_for_something_does_come_off_what_is_free(conn):
+    """Nothing has subtracted a goal yet, so it genuinely reduces spare money."""
+    account(conn, 1, "Savings", "savings")
+    cashflow.set_balance(conn, 1, "2026-08-13", 1200000)
+    commitments.save(conn, "New roof", "goal", "2027-06-01", target_cents=800000)
+    conn.commit()
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert (p.on_hand_cents, p.committed_cents, p.free_cents) == \
+        (1200000, 800000, 400000)
+
+
+def test_the_debt_figure_follows_the_account_rather_than_a_typed_number(conn):
+    """A card you are still spending on owes more each month, and a payoff plan
+    against a stale figure is fiction."""
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-01", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=1)
+    conn.commit()
+    add_txn(conn, 1, "2026-08-10", -50000, "MORE SPENDING ON IT")
+
+    c = commitments.all_commitments(conn, today=date(2026, 8, 13))[0]
+    assert c.outstanding_cents == 1470000
+    assert c.per_month_cents > 61739               # and the monthly cost went up
+
+
+def test_a_debt_already_cleared_asks_for_nothing(conn):
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 0)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=1)
+    conn.commit()
+
+    c = commitments.all_commitments(conn, today=date(2026, 8, 13))[0]
+    assert c.outstanding_cents == 0
+    assert c.per_month_cents == 0
+
+
+def test_a_card_in_credit_is_not_a_debt(conn):
+    """Overpay a card and it is money you have, not money you owe."""
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 5000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=1)
+    conn.commit()
+    assert commitments.all_commitments(conn, today=date(2026, 8, 13))[0]\
+        .outstanding_cents == 0
+
+
+def test_a_deadline_this_month_asks_for_all_of_it(conn):
+    """Zero months would divide by nothing; one month is the true answer."""
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", -100000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2026-08-20", account_id=1)
+    conn.commit()
+
+    c = commitments.all_commitments(conn, today=date(2026, 8, 13))[0]
+    assert c.months_left == 1
+    assert c.per_month_cents == 100000
+    assert c.overdue is True
+
+
+def test_everything_promised_adds_up_to_one_monthly_figure(conn):
+    account(conn, 1, "Savings", "savings")
+    account(conn, 2, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 1200000)
+    cashflow.set_balance(conn, 2, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=2)
+    commitments.save(conn, "New roof", "goal", "2027-08-01", target_cents=240000)
+    conn.commit()
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert p.per_month_cents == sum(c.per_month_cents for c in p.items)
+    # 11 months to the roof, not 12: the 1st falls before the 13th
+    roof = next(c for c in p.items if c.name == "New roof")
+    assert (roof.months_left, roof.per_month_cents) == (11, 21818)
+    assert p.has_debt_deadline is True
+
+
+# --- on the page --------------------------------------------------------------
+
+def test_the_page_separates_free_money_from_promised_money(signed_in):
+    conn = open_db()
+    account(conn, 1, "Savings", "savings")
+    cashflow.set_balance(conn, 1, date.today().isoformat(), 1200000)
+    commitments.save(conn, "New roof", "goal", "2027-06-01", target_cents=800000)
+    conn.commit()
+    conn.close()
+
+    r = signed_in.get("/cashflow")
+    assert "Set aside for something" in r.text
+    assert "Free to spend" in r.text
+    assert "$4,000.00" in r.text                  # 12,000 held minus 8,000 promised
+
+
+def test_the_page_can_take_a_payoff_and_report_its_monthly_cost(signed_in):
+    conn = open_db()
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, date.today().isoformat(), -1420000)
+    conn.commit()
+    conn.close()
+
+    page = signed_in.get("/cashflow")
+    signed_in.post("/cashflow/commitments", data={
+        "csrf": get_csrf(page.text), "name": "Clear the Amex", "kind": "payoff",
+        "account_id": "1", "due_date": "2028-08-01"})
+
+    r = signed_in.get("/cashflow")
+    assert "Clear the Amex" in r.text
+    assert "still owed by" in r.text
+    assert "not taken off twice" in r.text        # says why, rather than hiding it
+
+
+def test_a_commitment_can_be_removed(signed_in):
+    conn = open_db()
+    account(conn, 1, "Savings", "savings")
+    cid = commitments.save(conn, "New roof", "goal", "2027-06-01",
+                           target_cents=800000)
+    conn.commit()
+    conn.close()
+
+    page = signed_in.get("/cashflow")
+    signed_in.post("/cashflow/commitments", data={
+        "csrf": get_csrf(page.text), "commitment_id": str(cid), "delete": "1"})
+
+    conn = open_db()
+    assert commitments.all_commitments(conn) == []
+    conn.close()
+
+
+def test_a_commitment_with_no_date_is_refused_rather_than_guessed(signed_in):
+    conn = open_db()
+    account(conn, 1, "Savings", "savings")
+    conn.close()
+    page = signed_in.get("/cashflow")
+    signed_in.post("/cashflow/commitments", data={
+        "csrf": get_csrf(page.text), "name": "Vague", "kind": "goal",
+        "target": "100", "due_date": ""})
+
+    conn = open_db()
+    assert commitments.all_commitments(conn) == []
+    conn.close()

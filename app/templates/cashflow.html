@@ -20,6 +20,12 @@ last until payday".</p>
 <div class="card">
   <div class="spread"><span class="small muted">On hand today</span>
     <strong>{{ plain(forecast.start_cents) }}</strong></div>
+  {% if position.committed_cents %}
+  <div class="spread"><span class="small muted">Set aside for something</span>
+    <strong>−{{ currency }}{{ position.committed_cents|money }}</strong></div>
+  <div class="spread"><span class="small">Free to spend</span>
+    <strong class="{{ 'neg' if position.free_cents < 0 else 'pos' }}">{{ plain(position.free_cents) }}</strong></div>
+  {% endif %}
   <div class="spread"><span class="small muted">In {{ days }} days</span>
     <strong>{{ plain(forecast.end_cents) }}</strong></div>
   <p class="small muted" id="bal-note">
@@ -72,6 +78,83 @@ last until payday".</p>
     "there is nothing in it" are different answers.</p>
     <div class="actions"><button class="btn" type="submit">Save balances</button></div>
   </form>
+</div>
+
+{% if position.items %}
+<div class="card">
+  <h2>What the money is promised to</h2>
+  {% for c in position.items %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc">{{ c.name }}
+        <span class="chip">{{ 'debt' if c.kind == 'payoff' else 'set aside' }}</span>
+        {%- if c.overdue %} <span class="chip warn">due now</span>{% endif %}</div>
+      <div class="meta">
+        {%- if c.outstanding_cents %}{{ currency }}{{ c.outstanding_cents|money }}
+        {{ 'still owed' if c.kind == 'payoff' else 'to find' }} by
+        {{ c.due|day_month_year }} · {{ c.months_left }}
+        month{{ 's' if c.months_left != 1 }} left
+        {%- if c.account_name %} · {{ c.account_name }}{% endif %}
+        {%- else %}cleared — nothing left to find{% endif %}
+        {%- if c.note %} · {{ c.note }}{% endif %}</div>
+    </div>
+    <div class="amt">{{ currency }}{{ c.per_month_cents|money }}<span class="small muted">/mo</span></div>
+  </div>
+  <form method="post" action="/cashflow/commitments" class="note-act"
+        data-confirm="Remove {{ c.name }}?">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="commitment_id" value="{{ c.id }}">
+    <input type="hidden" name="delete" value="1">
+    <button class="btn small ghost" type="submit">Remove</button>
+  </form>
+  {% endfor %}
+  <p class="small muted">Together they need
+    <strong>{{ currency }}{{ position.per_month_cents|money }}</strong> a month to
+    land on time.
+    {% if position.has_debt_deadline %}A debt is already counted in what you have
+    — a card you owe on is a negative balance — so it is not taken off twice
+    here. What it adds is the deadline: that is what clearing it on time costs
+    every month from now.{% endif %}</p>
+</div>
+{% endif %}
+
+<div class="card">
+  <details>
+    <summary style="cursor:pointer; font-weight:600">Promise some money to something</summary>
+    <form method="post" action="/cashflow/commitments">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label class="f">What for</label>
+      <input type="text" name="name" placeholder="e.g. clear the Amex" required>
+
+      <label class="f">Which kind</label>
+      <select name="kind">
+        <option value="payoff">a debt to clear by then</option>
+        <option value="goal">money to have ready by then</option>
+      </select>
+
+      <label class="f">The account it's owed on (for a debt)</label>
+      <select name="account_id">
+        <option value="">—</option>
+        {% for a in accounts %}
+        <option value="{{ a.account_id }}">{{ a.name }}</option>
+        {% endfor %}
+      </select>
+      <p class="small muted">The amount is read off that account, so a card you
+      are still spending on updates itself rather than planning against a figure
+      typed once.</p>
+
+      <label class="f">How much (for money to have ready)</label>
+      <input type="text" inputmode="decimal" name="target" placeholder="0">
+
+      <label class="f">By when</label>
+      <input type="date" name="due_date" value="{{ today }}" required>
+
+      <label class="f">Note (optional)</label>
+      <input type="text" name="note">
+
+      <div class="actions"><button class="btn" type="submit">Save</button></div>
+    </form>
+  </details>
 </div>
 
 {% if forecast.events %}
