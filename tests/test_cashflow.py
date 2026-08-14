@@ -503,3 +503,68 @@ def test_a_commitment_with_no_date_is_refused_rather_than_guessed(signed_in):
     conn = open_db()
     assert commitments.all_commitments(conn) == []
     conn.close()
+
+
+def test_the_plan_is_checked_against_what_the_deadlines_need(conn):
+    """Knowing a payoff costs 617 a month is half an answer; the half that
+    matters is whether the month has 617 spare."""
+    account(conn, 1, "Citizens Checking")
+    account(conn, 2, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 100000)
+    cashflow.set_balance(conn, 2, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=2)
+    conn.commit()
+    declare(conn, "Salary", "monthly", 420000, "2026-08-25")
+    declare(conn, "Rent / Mortgage", "monthly", 145000, "2026-09-01")
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert p.surplus_cents == 420000 - 145000        # what the plan leaves
+    assert p.per_month_cents == 61739                # what the deadline needs
+    assert p.shortfall_cents == 0
+    assert p.on_track is True
+
+
+def test_a_deadline_the_month_cannot_cover_says_so(conn):
+    account(conn, 1, "Citizens Checking")
+    account(conn, 2, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", 100000)
+    cashflow.set_balance(conn, 2, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2027-02-01", account_id=2)
+    conn.commit()
+    declare(conn, "Salary", "monthly", 420000, "2026-08-25")
+    declare(conn, "Rent / Mortgage", "monthly", 380000, "2026-09-01")
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert p.per_month_cents > p.surplus_cents
+    assert p.shortfall_cents == p.per_month_cents - p.surplus_cents
+    assert p.on_track is False
+
+
+def test_with_no_plan_no_claim_is_made_either_way(conn):
+    """A surplus computed from nothing is not evidence of being on track."""
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, "2026-08-13", -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2028-08-01", account_id=1)
+    conn.commit()
+
+    p = commitments.position(conn, today=date(2026, 8, 13))
+    assert p.has_plan is False
+    assert p.on_track is False
+
+
+def test_the_page_says_whether_the_deadlines_are_affordable(signed_in):
+    conn = open_db()
+    account(conn, 1, "Amex", "credit")
+    cashflow.set_balance(conn, 1, date.today().isoformat(), -1420000)
+    commitments.save(conn, "Clear the Amex", "payoff", "2027-02-01", account_id=1)
+    conn.commit()
+    schedules.save(conn, category(conn, "Salary"), "monthly", 420000,
+                   date.today().isoformat())
+    schedules.save(conn, category(conn, "Rent / Mortgage"), "monthly", 380000,
+                   date.today().isoformat())
+    conn.commit()
+    conn.close()
+
+    r = signed_in.get("/cashflow")
+    assert "Short " in r.text
+    assert "don't land on time" in r.text

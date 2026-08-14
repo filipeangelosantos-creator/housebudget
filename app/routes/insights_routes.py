@@ -23,7 +23,8 @@ def _ordinal(day: int) -> str:
 @router.get("/insights")
 def insights_page(request: Request, conn=Depends(get_conn),
                   user=Depends(current_user), month: str | None = None,
-                  applied: int | None = None):
+                  applied: int | None = None,
+                  applied_n: int | None = None):
     m = clean_month(month)
     applied_row = conn.execute("SELECT name FROM categories WHERE id = ?",
                                (applied,)).fetchone() if applied else None
@@ -58,6 +59,7 @@ def insights_page(request: Request, conn=Depends(get_conn),
                   review=insights.budget_review(conn, m),
                   bills=insights.periodic_bills(conn, m),
                   applied_label=applied_row["name"] if applied_row else "",
+                  applied_n=applied_n or 0,
                   unmatched=transfers.unmatched_transfers(conn, m),
                   months_with_data=months_with_data,
                   is_current_month=is_current_month,

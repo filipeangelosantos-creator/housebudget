@@ -180,7 +180,10 @@
     };
     drillables.forEach(function (host) {
       var open = function (e) {
-        if (e.target.closest && e.target.closest("a")) return;   // links navigate
+        // Rows now carry controls of their own — a tick box, an amount. Those
+        // are not "open the details", they are the thing you came to do.
+        if (e.target.closest &&
+            e.target.closest("a, input, select, button, label, textarea")) return;
         e.preventDefault();
         // A sparkline bar sits inside a row that is itself drillable. Without
         // this the click reaches both, and the row — firing second — replaces
@@ -413,6 +416,40 @@
       if (e.target.classList.contains("split-amt")) recalc();
     });
     recalc();
+  }
+
+  // Budget check: tick several, change any figure, apply once.
+  var reviewPicks = document.getElementById("review-form");
+  if (reviewPicks) {
+    var applyBtn = document.getElementById("review-apply");
+    var allBox = document.getElementById("review-all");
+    var boxes = function () {
+      return reviewPicks.querySelectorAll(".review-pick");
+    };
+    var refreshApply = function () {
+      var n = reviewPicks.querySelectorAll(".review-pick:checked").length;
+      applyBtn.disabled = n === 0;
+      applyBtn.textContent = n ? "Apply " + n + " change" + (n === 1 ? "" : "s")
+                               : "Apply";
+      if (allBox) allBox.checked = n > 0 && n === boxes().length;
+    };
+    reviewPicks.addEventListener("change", function (e) {
+      if (e.target.classList.contains("review-pick")) refreshApply();
+    });
+    if (allBox) {
+      allBox.addEventListener("change", function () {
+        boxes().forEach(function (b) { b.checked = allBox.checked; });
+        refreshApply();
+      });
+    }
+    // Changing a figure is agreeing with it: tick the row so the edit is not
+    // typed and then lost to an untouched box.
+    reviewPicks.addEventListener("input", function (e) {
+      if (!e.target.classList.contains("review-amt")) return;
+      var row = e.target.closest(".review-note").querySelector(".review-pick");
+      if (row && !row.checked) { row.checked = true; refreshApply(); }
+    });
+    refreshApply();
   }
 
   // Budget editor: keep "does this fit inside my income?" answered while you

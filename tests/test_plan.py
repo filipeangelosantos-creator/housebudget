@@ -164,7 +164,8 @@ def test_a_suggestion_can_be_applied_without_retyping_it(signed_in):
     conn.close()
 
     page = signed_in.get("/insights?month=2026-08")
-    assert "Budget $120.00" in page.text            # the button, not just a figure
+    # the figure is editable and pre-filled, not merely reported
+    assert 'name="amt_%d" value="120.00"' % fuel in page.text
 
     r = signed_in.post("/budgets/apply", data={
         "csrf": get_csrf(page.text), "category_id": str(fuel),
@@ -424,3 +425,104 @@ def test_the_plan_page_lists_every_line_separately(signed_in):
     assert "Salary — mine" in r.text
     assert "Salary — my partner&#39;s" in r.text or "Salary — my partner's" in r.text
     assert r.text.count("/plan?edit=") == 2
+
+
+# --- several at once, at figures you chose ------------------------------------
+
+def test_several_budgets_can_be_applied_in_one_go(signed_in):
+    """Reading a list, disagreeing with three figures and pressing three
+    buttons in three places is the same decision made three times."""
+    conn = open_db()
+    for m in ("2026-03", "2026-04", "2026-05", "2026-06", "2026-07"):
+        add_txn(conn, 1, f"{m}-08", -12000, "SHELL", category(conn, "Fuel"))
+        add_txn(conn, 1, f"{m}-09", -4500, "CVS", category(conn, "Pharmacy"))
+    fuel, pharmacy = category(conn, "Fuel"), category(conn, "Pharmacy")
+    conn.close()
+
+    page = signed_in.get("/insights?month=2026-08")
+    r = signed_in.post("/budgets/apply-many", data={
+        "csrf": get_csrf(page.text), "month": "2026-08", "scope": "month",
+        "pick": [str(fuel), str(pharmacy)],
+        f"amt_{fuel}": "120.00", f"amt_{pharmacy}": "45.00",
+    }, follow_redirects=True)
+
+    assert amounts("2026-08") == {"Fuel": 12000, "Pharmacy": 4500}
+    assert "Saved <strong>2</strong> budgets" in r.text
+
+
+def test_only_the_ticked_ones_are_saved(signed_in):
+    conn = open_db()
+    for m in ("2026-03", "2026-04", "2026-05", "2026-06", "2026-07"):
+        add_txn(conn, 1, f"{m}-08", -12000, "SHELL", category(conn, "Fuel"))
+        add_txn(conn, 1, f"{m}-09", -4500, "CVS", category(conn, "Pharmacy"))
+    fuel, pharmacy = category(conn, "Fuel"), category(conn, "Pharmacy")
+    conn.close()
+
+    page = signed_in.get("/insights?month=2026-08")
+    signed_in.post("/budgets/apply-many", data={
+        "csrf": get_csrf(page.text), "month": "2026-08", "scope": "month",
+        "pick": str(fuel),
+        f"amt_{fuel}": "120.00", f"amt_{pharmacy}": "45.00",
+    })
+    assert amounts("2026-08") == {"Fuel": 12000}       # Pharmacy untouched
+
+
+def test_the_figure_you_typed_is_the_one_saved(signed_in):
+    """The suggestion is a starting point, not the answer."""
+    conn = open_db()
+    for m in ("2026-03", "2026-04", "2026-05", "2026-06", "2026-07"):
+        add_txn(conn, 1, f"{m}-08", -12000, "SHELL", category(conn, "Fuel"))
+    fuel = category(conn, "Fuel")
+    conn.close()
+
+    page = signed_in.get("/insights?month=2026-08")
+    signed_in.post("/budgets/apply-many", data={
+        "csrf": get_csrf(page.text), "month": "2026-08", "scope": "month",
+        "pick": str(fuel), f"amt_{fuel}": "95.50",
+    })
+    assert amounts("2026-08") == {"Fuel": 9550}        # not the 120 suggested
+
+
+def test_a_batch_can_reach_forward_too(signed_in):
+    conn = open_db()
+    fuel = category(conn, "Fuel")
+    budgets.set_budget(conn, fuel, "2026-11", 9900)
+    for m in ("2026-03", "2026-04", "2026-05", "2026-06", "2026-07"):
+        add_txn(conn, 1, f"{m}-08", -12000, "SHELL", fuel)
+    conn.commit()
+    conn.close()
+
+    page = signed_in.get("/insights?month=2026-08")
+    signed_in.post("/budgets/apply-many", data={
+        "csrf": get_csrf(page.text), "month": "2026-08", "scope": "onward",
+        "pick": str(fuel), f"amt_{fuel}": "120.00",
+    })
+    assert amounts("2026-08") == {"Fuel": 12000}
+    assert amounts("2026-11") == {}                    # inherits now
+
+
+def test_the_controls_sit_at_the_end_not_under_every_row(signed_in):
+    """One set of controls for the card, rather than a button under each row."""
+    conn = open_db()
+    for m in ("2026-03", "2026-04", "2026-05", "2026-06", "2026-07"):
+        add_txn(conn, 1, f"{m}-08", -12000, "SHELL", category(conn, "Fuel"))
+        add_txn(conn, 1, f"{m}-09", -4500, "CVS", category(conn, "Pharmacy"))
+    conn.close()
+
+    r = signed_in.get("/insights?month=2026-08")
+    assert r.text.count('class="review-actions"') == 1
+    assert r.text.count('name="scope"') == 1
+    assert r.text.count('class="review-pick"') >= 2      # one tick box per row
+    assert r.text.count('class="review-amt"') >= 2       # and one editable figure
+    # and the controls come after the last row
+    assert r.text.index('class="review-actions"') > r.text.rindex('class="review-amt"')
+
+
+def test_a_batch_needs_a_valid_token(signed_in):
+    conn = open_db()
+    fuel = category(conn, "Fuel")
+    conn.close()
+    signed_in.post("/budgets/apply-many", data={
+        "csrf": "nope", "month": "2026-08", "pick": str(fuel),
+        f"amt_{fuel}": "120.00"})
+    assert amounts("2026-08") == {}

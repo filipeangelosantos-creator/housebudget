@@ -33,66 +33,72 @@
 {% endif %}
 
 {# --- What the budget needs from you ------------------------------------- #}
-{% if applied_label %}
-<div class="banner"><div class="grow">Budget saved for
-  <strong>{{ applied_label }}</strong>. <a href="/budgets?month={{ month }}">See the
-  whole budget</a>.</div></div>
+{% if applied_label or applied_n %}
+<div class="banner"><div class="grow">
+  {%- if applied_n %}Saved <strong>{{ applied_n }}</strong> budget{{ 's' if applied_n != 1 }}.
+  {%- else %}Budget saved for <strong>{{ applied_label }}</strong>.{% endif %}
+  <a href="/budgets?month={{ month }}">See the whole budget</a>.</div></div>
 {% endif %}
 
 {% if review %}
 <div class="card">
   <h2>Budget check</h2>
-  {% for n in review %}
-  <div class="txn review-note" data-drill-kind="category" data-drill-key="{{ n.category }}"
-       data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
-    <div class="mid">
-      <div class="desc">{{ n.category }}
-        {%- if n.kind == 'over' %} <span class="chip warn">over</span>
-        {%- elif n.kind == 'unbudgeted' %} <span class="chip">no budget</span>
-        {%- elif n.kind == 'raise' %} <span class="chip uncat">too low</span>
-        {%- elif n.kind == 'lower' %} <span class="chip">room to spare</span>
-        {%- elif n.kind == 'periodic' %} <span class="chip">{{ n.bill.cadence }}</span>
-        {%- endif %}</div>
-      <div class="meta">
-        {%- if n.kind == 'over' %}{{ currency }}{{ n.actual|money }} spent of
-          {{ currency }}{{ n.budget|money }} budgeted
-        {%- elif n.kind == 'unbudgeted' %}not budgeted, but you spend about
-          {{ currency }}{{ n.typical|money }} a month
-        {%- elif n.kind == 'raise' %}budgeted {{ currency }}{{ n.budget|money }},
-          usually costs {{ currency }}{{ n.typical|money }}
-        {%- elif n.kind == 'lower' %}budgeted {{ currency }}{{ n.budget|money }},
-          usually costs {{ currency }}{{ n.typical|money }}
-        {%- elif n.kind == 'periodic' %}{{ currency }}{{ n.bill.typical_cents|money }}
-          every {{ n.bill.months_per }} months · next due
-          {{ n.bill.next_due|day_month_year }}
-        {%- endif %}</div>
-    </div>
-    <div class="amt {{ 'neg' if n.kind == 'over' }}">
-      {%- if n.kind == 'over' %}+{{ currency }}{{ n.over_by|money }}
-      {%- else %}{{ currency }}{{ n.suggested|money }}<span class="small muted">/mo</span>
-      {%- endif %}</div>
-  </div>
-  {# Acting on it here, rather than reading a figure, agreeing with it and
-     then retyping it on another page. #}
-  <form method="post" action="/budgets/apply" class="note-act">
+  {# One form for the lot. Reading a list, disagreeing with three figures and
+     then pressing three buttons in three places is a chore; ticking three and
+     pressing once is the same decision made once. #}
+  <form method="post" action="/budgets/apply-many" id="review-form">
     <input type="hidden" name="csrf" value="{{ csrf }}">
-    <input type="hidden" name="category_id" value="{{ n.category_id }}">
     <input type="hidden" name="month" value="{{ month }}">
-    <input type="hidden" name="amount" value="{{ n.suggested|money_plain }}">
-    <input type="hidden" name="back" value="/insights?month={{ month }}">
-    <button class="btn small" type="submit">Budget {{ currency }}{{ n.suggested|money }}</button>
-    <select name="scope" aria-label="How far this applies">
-      <option value="onward">from {{ month_label }} on</option>
-      <option value="month">for {{ month_label }} only</option>
-    </select>
-    <a class="small" href="/plan?category={{ n.category_id }}&month={{ month }}">
-      {{ 'Change the schedule' if n.kind == 'periodic' else "Doesn't happen monthly?" }}</a>
+    {% for n in review %}
+    <div class="txn review-note" data-drill-kind="category" data-drill-key="{{ n.category }}"
+         data-drill-month="{{ month }}" role="button" tabindex="0" aria-expanded="false">
+      <input type="checkbox" class="review-pick" name="pick" value="{{ n.category_id }}"
+             aria-label="Change the budget for {{ n.category }}">
+      <div class="mid">
+        <div class="desc">{{ n.category }}
+          {%- if n.kind == 'over' %} <span class="chip warn">over</span>
+          {%- elif n.kind == 'unbudgeted' %} <span class="chip">no budget</span>
+          {%- elif n.kind == 'raise' %} <span class="chip uncat">too low</span>
+          {%- elif n.kind == 'lower' %} <span class="chip">room to spare</span>
+          {%- elif n.kind == 'periodic' %} <span class="chip">{{ n.bill.cadence }}</span>
+          {%- endif %}</div>
+        <div class="meta">
+          {%- if n.kind == 'over' %}{{ currency }}{{ n.actual|money }} spent of
+            {{ currency }}{{ n.budget|money }} budgeted ·
+            {{ currency }}{{ n.over_by|money }} over
+          {%- elif n.kind == 'unbudgeted' %}not budgeted, but you spend about
+            {{ currency }}{{ n.typical|money }} a month
+          {%- elif n.kind in ('raise', 'lower') %}budgeted
+            {{ currency }}{{ n.budget|money }}, usually costs
+            {{ currency }}{{ n.typical|money }}
+          {%- elif n.kind == 'periodic' %}{{ currency }}{{ n.bill.typical_cents|money }}
+            every {{ n.bill.months_per }} months · next due
+            {{ n.bill.next_due|day_month_year }}
+            {%- if n.line_count > 1 %} · {{ n.line_count }} scheduled lines{% endif %}
+          {%- endif %} ·
+          <a href="/plan?category={{ n.category_id }}&month={{ month }}">{{ 'change the schedule' if n.kind == 'periodic' else "not monthly?" }}</a></div>
+      </div>
+      <input type="text" inputmode="decimal" class="review-amt"
+             name="amt_{{ n.category_id }}" value="{{ n.suggested|money_plain }}"
+             aria-label="New monthly budget for {{ n.category }}">
+    </div>
+    {% endfor %}
+
+    <div class="review-actions">
+      <label class="check"><input type="checkbox" id="review-all">
+        <span class="small">All of them</span></label>
+      <select name="scope" aria-label="How far this applies">
+        <option value="onward">from {{ month_label }} on</option>
+        <option value="month">for {{ month_label }} only</option>
+      </select>
+      <button class="btn" type="submit" id="review-apply" disabled>Apply</button>
+    </div>
   </form>
-  {% endfor %}
-  <p class="small muted">Tap a row for the transactions behind it, or
-    <a href="/budgets?month={{ month }}">open the budget</a> to change everything at
-    once. "{{ currency }}…/mo" is what that category would need each month, from
-    what you actually spend — for the scheduled ones, what to set aside.</p>
+  <p class="small muted">Change any figure before you tick it. The amount is
+  what that category would need each month, from what you actually spend — for
+  the scheduled ones, what to set aside. Tap a row to see the transactions
+  behind it, or <a href="/budgets?month={{ month }}">open the budget</a> to
+  change everything at once.</p>
 </div>
 {% endif %}
 

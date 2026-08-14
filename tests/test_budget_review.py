@@ -253,7 +253,7 @@ def test_the_insights_page_shows_the_budget_check(signed_in):
     r = signed_in.get("/insights?month=2026-08")
     assert "Budget check" in r.text
     assert "$420.00 spent of" in r.text
-    assert "+$120.00" in r.text
+    assert "$120.00 over" in r.text
     assert 'href="/budgets?month=2026-08"' in r.text
 
 

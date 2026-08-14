@@ -476,3 +476,14 @@ details.adv summary { cursor: pointer; color: var(--accent); font-size: 14px; }
                                 text-align: right; }
 .import-rows select { width: auto; padding: 4px 6px; font-size: 14px; }
 .import-rows td { vertical-align: middle; }
+
+/* --- budget check: pick several, apply once ------------------------------ */
+.review-note { gap: 10px; }
+.review-pick { flex: 0 0 auto; width: 18px; height: 18px; margin: 0; }
+.review-amt { flex: 0 0 7.5em; width: 7.5em; padding: 5px 8px; font-size: 14px;
+              text-align: right; }
+.review-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+                  padding-top: 12px; margin-top: 4px;
+                  border-top: 1px solid var(--border); }
+.review-actions select { width: auto; padding: 6px 10px; font-size: 14px; }
+.review-actions .check { margin: 0; flex: 1 1 auto; }

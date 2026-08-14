@@ -119,6 +119,33 @@ def budgets_use_expected(request: Request, conn=Depends(get_conn),
     return RedirectResponse(f"/budgets?month={m}", status_code=303)
 
 
+@router.post("/budgets/apply-many", dependencies=[Depends(verify_csrf)])
+async def budgets_apply_many(request: Request, conn=Depends(get_conn),
+                             user=Depends(current_user)):
+    """Take several suggestions at once, at whatever figures you settled on.
+
+    Reading a list, disagreeing with three of the figures and then pressing
+    three buttons in three places is the same decision made three times.
+    """
+    form = await request.form()
+    m = clean_month(str(form.get("month", "")))
+    onward = str(form.get("scope", "")) == "onward"
+    applied = 0
+    for raw in form.getlist("pick"):
+        cat_id = str(raw)
+        if not cat_id.isdigit():
+            continue
+        cents = abs(parse_money_input(str(form.get(f"amt_{cat_id}", ""))))
+        if onward:
+            budgets.set_budget_onward(conn, int(cat_id), m, cents)
+        else:
+            budgets.set_budget(conn, int(cat_id), m, cents)
+        applied += 1
+    conn.commit()
+    return RedirectResponse(f"/insights?month={m}&applied_n={applied}",
+                            status_code=303)
+
+
 @router.post("/budgets/copy", dependencies=[Depends(verify_csrf)])
 def budgets_copy(request: Request, conn=Depends(get_conn),
                  user=Depends(current_user), month: str = Form(...),

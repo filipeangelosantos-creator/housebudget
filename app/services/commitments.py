@@ -117,19 +117,46 @@ class Position:
     free_cents: int              # what is genuinely spare
     per_month_cents: int         # what every commitment needs each month
     items: list[Commitment]
+    surplus_cents: int = 0       # what the plan leaves over each month
+    planned_income_cents: int = 0
+    planned_outgoings_cents: int = 0
+    has_plan: bool = False
 
     @property
     def has_debt_deadline(self) -> bool:
         return any(c.kind == "payoff" and c.outstanding_cents for c in self.items)
 
+    @property
+    def shortfall_cents(self) -> int:
+        """How far the month falls short of what the deadlines need.
+
+        Knowing a payoff costs 617 a month is only half an answer; the half
+        that matters is whether the month has 617 spare. Zero when it does.
+        """
+        return max(0, self.per_month_cents - self.surplus_cents)
+
+    @property
+    def on_track(self) -> bool:
+        return self.has_plan and self.per_month_cents > 0 and not self.shortfall_cents
+
 
 def position(conn, today: date | None = None) -> Position:
-    """What you have, what of it is spoken for, and what that costs a month."""
+    """What you have, what of it is spoken for, and whether the month covers it."""
+    from . import schedules as sched
+
     today = today or date.today()
     items = all_commitments(conn, today)
     on_hand = cashflow.on_hand(conn, today)[0]
     committed = sum(c.outstanding_cents for c in items if c.reduces_free_money)
+
+    # Only declared schedules, for the same reason the forecast uses only those:
+    # a surplus computed from guesses would be a licence to spend.
+    lines = [s for s in sched.all_schedules(conn) if s.amount_cents]
+    income = sum(s.monthly_cents for s in lines if s.kind == "income")
+    outgoings = sum(s.monthly_cents for s in lines if s.kind != "income")
     return Position(on_hand_cents=on_hand, committed_cents=committed,
                     free_cents=on_hand - committed,
                     per_month_cents=sum(c.per_month_cents for c in items),
-                    items=items)
+                    items=items, surplus_cents=income - outgoings,
+                    planned_income_cents=income,
+                    planned_outgoings_cents=outgoings, has_plan=bool(lines))

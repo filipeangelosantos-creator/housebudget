@@ -108,6 +108,21 @@ last until payday".</p>
     <button class="btn small ghost" type="submit">Remove</button>
   </form>
   {% endfor %}
+  {% if position.has_plan and position.per_month_cents %}
+  <div class="bal-strip {{ 'neg' if position.shortfall_cents else 'pos' }}"
+       style="position:static; margin-top:10px">
+    {%- if position.shortfall_cents %}Short {{ currency }}{{ position.shortfall_cents|money }} a month
+    {%- else %}On track — {{ currency }}{{ (position.surplus_cents - position.per_month_cents)|money }} a month to spare{% endif %}</div>
+  <p class="small muted">Your plan brings in
+    {{ currency }}{{ position.planned_income_cents|money }} a month and commits
+    {{ currency }}{{ position.planned_outgoings_cents|money }} of it, leaving
+    {{ plain(position.surplus_cents) }}. These deadlines need
+    {{ currency }}{{ position.per_month_cents|money }} of that.
+    {% if position.shortfall_cents %}At this rate they don't land on time —
+    something has to give, or the date does.{% endif %}
+    Only what's on <a href="/plan">your plan</a> is counted, so if the everyday
+    spending isn't scheduled the surplus here is flattering.</p>
+  {% endif %}
   <p class="small muted">Together they need
     <strong>{{ currency }}{{ position.per_month_cents|money }}</strong> a month to
     land on time.
