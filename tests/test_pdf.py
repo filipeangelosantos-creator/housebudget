@@ -307,3 +307,34 @@ def test_pdf_import_dedupes_like_any_other_statement(conn):
     again = importer.commit_import(conn, 1, "s.pdf", data,
                                    load_statement("s.pdf", data).parsed, 1)
     assert again.added == 0 and again.duplicates == 7
+
+
+def test_a_section_heading_is_read_even_with_its_total_beside_it():
+    """Reported: a Citizens statement imported every deposit as money out.
+
+    The heading was only looked for on lines with no figure on them, and this
+    bank prints "Deposits & Credits" with the section total alongside. The
+    heading never registered, so the deposits inherited the sign of the
+    withdrawals section above and the month was wrong by the whole section.
+    """
+    _, rows = parsed(F.sectioned_with_totals_beside_the_heading())
+    by_desc = {r.description[:20]: r.amount_cents for r in rows if not r.error}
+
+    assert by_desc["AMEX EPAYMENT ACH PM"] == -338955        # under Withdrawals
+    assert by_desc["CHASE CREDIT CRD AUT"] == -34167
+    assert by_desc["EVERSOURCE WEB_PAY 0"] == -20000
+    assert by_desc["HSBCBK CK WEBXFR P2P"] == 400000         # under Deposits
+    assert by_desc["THE BOSTON CONSU PAY"] == 207943
+    assert by_desc["AMEX EPAYMENT RETRY "] == 39055
+
+
+def test_the_section_totals_are_not_imported_as_transactions():
+    _, rows = parsed(F.sectioned_with_totals_beside_the_heading())
+    assert len(rows) == 6                                    # not 8, not 9
+    assert not any(abs(r.amount_cents) == 646998 for r in rows)
+    assert not any(abs(r.amount_cents) == 80016 for r in rows)
+
+
+def test_a_daily_balance_after_the_sections_is_still_skipped():
+    _, rows = parsed(F.sectioned_with_totals_beside_the_heading())
+    assert not any(abs(r.amount_cents) == 126210 for r in rows)

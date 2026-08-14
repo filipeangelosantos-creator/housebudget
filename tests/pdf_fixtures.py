@@ -486,3 +486,63 @@ def scanned_like_no_text() -> bytes:
     c.line(60, H - 200, 460, H - 200)
     c.save()
     return buf.getvalue()
+
+
+def sectioned_with_totals_beside_the_heading() -> bytes:
+    """Unsigned amounts under section headings that carry their own total.
+
+    Citizens prints "Deposits & Credits" with the section total on the same
+    line. The direction lives in the heading and nowhere else — the figures
+    below it are unsigned — so a heading that goes unread takes the whole
+    section's sign with it.
+    """
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=A4)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(50, H - 60, "One Deposit Checking for XXXXXX-611-3")
+    c.setFont("Helvetica", 9)
+    c.drawString(50, H - 76, "Statement period 01 Aug 2026 - 31 Aug 2026")
+
+    y = H - 110
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Withdrawals & Debits**")
+    _draw_right(c, 545, y, "800.16")            # a total, on the heading line
+    y -= 12
+    c.setFont("Helvetica", 8)
+    c.drawString(50, y, "**May include checks processed electronically.")
+    y -= 16
+
+    c.setFont("Helvetica", 9)
+    for day, amount, desc in (("08/04", "3,389.55", "AMEX EPAYMENT ACH PMT 260804"),
+                              ("08/10", "341.67", "CHASE CREDIT CRD AUTOPAY 260807"),
+                              ("08/12", "200.00", "EVERSOURCE WEB_PAY 081226")):
+        c.drawString(50, y, day)
+        c.drawString(110, y, desc)
+        _draw_right(c, 545, y, amount)
+        y -= 14
+
+    y -= 8
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Deposits & Credits")
+    c.drawString(200, y, "Total Deposits & Credits")
+    _draw_right(c, 545, y, "6,469.98")          # and again here
+    y -= 16
+
+    c.setFont("Helvetica", 9)
+    for day, amount, desc in (("08/05", "4,000.00", "HSBCBK CK WEBXFR P2P 260805"),
+                              ("08/06", "2,079.43", "THE BOSTON CONSU PAYROLL 260807"),
+                              ("08/07", "390.55", "AMEX EPAYMENT RETRY PYMT 260804")):
+        c.drawString(50, y, day)
+        c.drawString(110, y, desc)
+        _draw_right(c, 545, y, amount)
+        y -= 14
+
+    y -= 8
+    c.setFont("Helvetica-Bold", 9)
+    c.drawString(50, y, "Daily Balance")
+    y -= 14
+    c.setFont("Helvetica", 9)
+    c.drawString(50, y, "08/04")
+    _draw_right(c, 545, y, "1,262.10")
+    c.save()
+    return buf.getvalue()

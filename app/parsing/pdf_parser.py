@@ -348,11 +348,11 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     for page_no, lines in enumerate(pages):
         for line in lines:
             dates, reference, desc_words, money, _markers = _split_line(line)
+            kind = _section_for(" ".join(w["text"] for w in line))
+            if kind and not dates:
+                section = kind
+                continue
             if not money:
-                text = " ".join(w["text"] for w in line)
-                kind = _section_for(text)
-                if kind:
-                    section = kind
                 continue
             if dates:
                 parsed.append((page_no, dates, reference, desc_words, money, section))
@@ -389,12 +389,19 @@ def read_pdf_rows(data: bytes) -> list[list[str]]:
     for page_no, lines in enumerate(pages):
         for line_no, line in enumerate(lines):
             dates, reference, desc_words, money, markers = _split_line(line)
+            # A heading is a heading whether or not the section's total is
+            # printed beside it. Requiring a line with no money on it meant
+            # "Deposits & Credits    Total Deposits & Credits   6,469.98" never
+            # registered, so every deposit under it kept the sign of the
+            # withdrawals section above — a whole section imported backwards.
+            # A dated line is a transaction, never a heading, so a description
+            # that happens to read "MOBILE DEPOSITS" cannot masquerade as one.
+            kind = _section_for(" ".join(w["text"] for w in line))
+            if kind and not dates:
+                section = kind
+                last_date_cells = None
+                continue
             if not money:
-                text = " ".join(w["text"] for w in line)
-                kind = _section_for(text)
-                if kind:
-                    section = kind
-                    last_date_cells = None
                 continue
             if section == "balance":
                 continue
