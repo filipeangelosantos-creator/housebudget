@@ -3,6 +3,9 @@
 Run locally:  uvicorn app.main:app --reload
 Production:   see Dockerfile / docker-compose.yml
 """
+import getpass
+import logging
+import sqlite3
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -29,9 +32,46 @@ async def lifespan(app: FastAPI):
     try:
         db.init_db(conn)
         seed_defaults(conn)
+        _announce(conn)
     finally:
         conn.close()
     yield
+
+
+def _announce(conn) -> None:
+    """Say which database this is, every time the app starts.
+
+    Where the data lives is resolved from the environment, from whether a
+    ./data directory happens to exist, and otherwise from the home directory of
+    whoever is running the process — so the same code can open a different file
+    depending on which account started it. When that happens the app looks
+    factory-fresh rather than broken, which is the worst way for it to fail.
+    Printing the path and the row counts turns that into a one-line diagnosis.
+    """
+    logger = logging.getLogger("housebudget")
+    users, txns = 0, 0
+    try:
+        users = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        txns = conn.execute("SELECT COUNT(*) FROM transactions").fetchone()[0]
+    except sqlite3.Error:                       # a database too broken to count
+        logger.warning("HouseBudget data: %s (unreadable)", config.DB_PATH)
+        return
+    logger.warning("HouseBudget data: %s", config.DB_PATH)
+    logger.warning("HouseBudget: %d user(s), %d transaction(s), running as %s",
+                   users, txns, _whoami())
+    if not users:
+        logger.warning(
+            "HouseBudget: this database is empty, so the app will ask you to "
+            "set it up. If you already had one, this is a different file — set "
+            "HB_DATA_DIR to the directory holding it and restart.")
+
+
+def _whoami() -> str:
+    """Whoever owns this process, for when a service and a terminal disagree."""
+    try:
+        return getpass.getuser()
+    except Exception:                           # no password database, no USER
+        return "unknown"
 
 
 app = FastAPI(title="HouseBudget", lifespan=lifespan, docs_url=None, redoc_url=None,

@@ -118,6 +118,24 @@ asserting it.
 
 Put it somewhere else by setting `HB_DATA_DIR` before starting.
 
+**If it asks you to set it up when you already have data**, it has opened a
+different file — nothing has been deleted. That happens most often when the app
+is started by a *different account* from the one you set it up with: a Windows
+service installed with `nssm` runs as LocalSystem by default, whose home
+directory is `C:\Windows\System32\config\systemprofile`, so it gets a fresh
+empty database of its own. Run `doctor.bat` (Windows) or
+`python -m app.doctor` (anywhere) to see which file the app would open, what is
+in it, why that location was chosen, and every other database it can find. Then
+point it at the right one:
+
+```
+setx /M HB_DATA_DIR "C:\Users\you\.housebudget"     REM machine-wide, for a service
+```
+
+Machine-wide variables are only read when a service starts, so stop and start it
+afterwards. The app also prints the path and the row counts to its log on every
+start, so the same answer is in the server window.
+
 **Back it up.** Settings → *Download database backup* gives you a single file
 containing everything; restoring is dropping it back as `budget.db` in that
 folder. Copying that file somewhere safe now and then is the whole backup
