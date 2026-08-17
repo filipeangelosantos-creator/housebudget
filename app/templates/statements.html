@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Statements{% endblock %}
+{% block content %}
+
+<div class="month-nav">
+  <a href="/statements?month={{ prev_month }}" aria-label="Previous month">‹</a>
+  <span class="label">Statements · {{ month_label }}</span>
+  <a href="/statements?month={{ next_month }}" aria-label="Next month">›</a>
+</div>
+
+{% if closed_n %}
+<div class="banner"><div class="grow">Marked <strong>{{ closed_n }}</strong> account{{ 's' if closed_n != 1 }} as in for {{ month_label }}.</div></div>
+{% endif %}
+
+<p class="small muted">Statements arrive late, so a month can be missing half
+its spending and still look like a good one. This is what has actually landed.
+The app can only go on the dates it holds — you can overrule it either way, and
+what you say here is what the rest of the site believes.</p>
+
+<div class="card">
+  <h2>{{ month_label }}</h2>
+  {% if not cov.rows %}
+  <p class="muted">No accounts yet — <a href="/accounts">add one</a>.</p>
+  {% else %}
+
+  {% if cov.complete %}
+  <div class="bal-strip pos" style="position:static; margin-bottom:10px">Everything is in for {{ month_label }}</div>
+  {% elif cov.in_progress %}
+  <div class="bal-strip" style="position:static; margin-bottom:10px">{{ month_label }} is still running</div>
+  {% else %}
+  <div class="bal-strip neg" style="position:static; margin-bottom:10px">Still waiting on {{ cov.pending|length }} of {{ cov.expected|length }}</div>
+  {% endif %}
+
+  {% for r in cov.rows %}
+  <div class="txn cov-row {{ r.state }}">
+    <div class="mid">
+      <div class="desc">{{ r.name }}
+        <span class="chip {{ 'good' if r.settled }}{{ 'uncat' if r.pending }}">{{ r.label }}</span>
+        {%- if r.marked %} <span class="chip">you said so</span>{% endif %}</div>
+      <div class="meta">
+        {%- if r.state == 'dormant' and r.archived %}archived, so no statement is expected
+        {%- elif r.state == 'dormant' %}added after this month, so none is expected
+        {%- elif r.count %}{{ r.count }} transaction{{ 's' if r.count != 1 }}, to {{ r.stops_at|day_month }}
+        {%- elif r.last_date %}nothing this month · last seen {{ r.last_date|day_month_year }}
+        {%- else %}nothing imported on this account yet{% endif %}
+        {%- if r.note %} · {{ r.note }}{% endif %}</div>
+    </div>
+    {% if r.state != 'dormant' %}
+    <form method="post" action="/statements/mark" class="cov-act">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <input type="hidden" name="account_id" value="{{ r.account_id }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      {% if r.marked %}
+      <button class="btn small ghost" name="state" value="clear" type="submit">Undo</button>
+      {% else %}
+      <button class="btn small ghost" name="state" value="waiting" type="submit">Still coming</button>
+      {% endif %}
+      {% if r.state != 'closed' %}
+      <button class="btn small" name="state" value="closed" type="submit">It's in</button>
+      {% endif %}
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if cov.pending %}
+  <form method="post" action="/statements/close-all" class="review-actions">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <input type="hidden" name="month" value="{{ month }}">
+    <button class="btn" type="submit">Everything is in for {{ month_label }}</button>
+  </form>
+  {% endif %}
+  {% endif %}
+</div>
+
+{% if gaps %}
+<div class="card">
+  <h2>Earlier months still waiting</h2>
+  <p class="small muted">A closed month drops off this list, so it should shrink
+  as you work through it rather than sit here as a permanent warning.</p>
+  {% for g in gaps %}
+  <div class="txn">
+    <div class="mid">
+      <div class="desc"><a href="/statements?month={{ g.month }}">{{ g.month|month_name }}</a></div>
+      <div class="meta">waiting on {{ g.pending_names }}</div>
+    </div>
+    <div class="amt small">{{ g.pending|length }}</div>
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<p class="footer-note">An account you have stopped using can be archived on
+<a href="/accounts">the accounts page</a> — an archived account is never
+counted as missing here.</p>
+
+{% endblock %}

@@ -3,7 +3,8 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from ..deps import current_user, get_conn, render, verify_csrf
-from ..services import budgets, drill, insights, splits as splits_svc, transfers
+from ..services import (budgets, coverage, drill, insights,
+                        splits as splits_svc, transfers)
 from ..services.charts import (cashflow_chart, net_bars_chart, pace_chart,
                                spark_bars, stacked_chart)
 from .dashboard import clean_month
@@ -63,7 +64,8 @@ def insights_page(request: Request, conn=Depends(get_conn),
                   unmatched=transfers.unmatched_transfers(conn, m),
                   months_with_data=months_with_data,
                   is_current_month=is_current_month,
-                  summary=summary)
+                  summary=summary,
+                  cov=coverage.for_month(conn, m))
 
 
 @router.get("/insights/drill")

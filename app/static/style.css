@@ -487,3 +487,17 @@ details.adv summary { cursor: pointer; color: var(--accent); font-size: 14px; }
                   border-top: 1px solid var(--border); }
 .review-actions select { width: auto; padding: 6px 10px; font-size: 14px; }
 .review-actions .check { margin: 0; flex: 1 1 auto; }
+
+/* --- statement coverage ---------------------------------------------------
+   An account that has reported recedes; one still to come stays legible, so
+   scanning the list answers "what am I waiting for" without reading it. */
+.chip.good { background: color-mix(in srgb, var(--good) 22%, var(--surface));
+             color: var(--ink); }
+.cov-row { align-items: center; gap: 10px; }
+.cov-row.dormant { opacity: .55; }
+.cov-row.waiting .desc, .cov-row.partial .desc { font-weight: 600; }
+/* The state chip is the whole point of the row, so a long account name wraps
+   rather than truncating the chip off the end of the line. */
+.cov-row .desc { white-space: normal; overflow: visible; }
+.cov-act { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.cov-act .btn { white-space: nowrap; }

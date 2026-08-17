@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import RedirectResponse
 
 from ..deps import current_user, get_conn, parse_money_input, render, verify_csrf
-from ..services import budgets, insights
+from ..services import budgets, coverage, insights
 from .dashboard import clean_month
 
 router = APIRouter()
@@ -36,7 +36,8 @@ def budgets_page(request: Request, conn=Depends(get_conn),
                   copied_from=clean_month(copied_from) if copied_from else "",
                   copied_from_label=budgets.month_label(clean_month(copied_from))
                   if copied_from else "",
-                  income=insights.expected_income(conn, m))
+                  income=insights.expected_income(conn, m),
+                  cov=coverage.for_month(conn, m))
 
 
 @router.post("/budgets/save", dependencies=[Depends(verify_csrf)])

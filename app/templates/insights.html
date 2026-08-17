@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import amount, plain with context %}
+{% from "_macros.html" import amount, plain, coverage_note with context %}
 {% block title %}Insights{% endblock %}
 {% block content %}
 
@@ -8,6 +8,8 @@
   <span class="label">Insights · {{ month_label }}</span>
   <a href="/insights?month={{ next_month }}" aria-label="Next month">›</a>
 </div>
+
+{{ coverage_note(cov, month, month_label) }}
 {# Bars carry their own month, so a panel needs to know which month the page is
    on to tell you when it is showing you a different one. #}
 <span id="page-month" data-month="{{ month }}" hidden></span>

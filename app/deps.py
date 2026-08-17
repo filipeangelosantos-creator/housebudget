@@ -55,6 +55,13 @@ def day_month_year(d) -> str:
     return f"{day_month(d)} {d.year}"
 
 
+def month_name(month: str) -> str:
+    """'2026-08' as 'August 2026'. Same reason as day_month: no strftime."""
+    from .services.budgets import month_label
+    return month_label(month)
+
+
+templates.env.filters["month_name"] = month_name
 templates.env.filters["money"] = money
 templates.env.filters["money_signed"] = money_signed
 templates.env.filters["money_plain"] = money_plain

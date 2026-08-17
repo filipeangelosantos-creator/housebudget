@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import plain with context %}
+{% from "_macros.html" import plain, coverage_note with context %}
 {% block title %}Budget{% endblock %}
 {% block content %}
 
@@ -8,6 +8,8 @@
   <span class="label">Budget · {{ month_label }}</span>
   <a href="/budgets?month={{ next_month }}" aria-label="Next month">›</a>
 </div>
+
+{{ coverage_note(cov, month, month_label) }}
 
 {# Whether the plan fits inside the income is the question this page exists to
    answer, so it is stated in words at the top and kept live as you type —

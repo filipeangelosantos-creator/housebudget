@@ -20,3 +20,20 @@
   {%- endfor %}
 </select>
 {%- endmacro %}
+
+{# A month whose statements haven't all arrived is a month whose totals are
+   too low, which reads exactly like an underspend. Say so wherever a figure
+   for that month is on screen, rather than only on the statements page. #}
+{% macro coverage_note(cov, month, month_label) -%}
+{%- if cov and cov.pending and not cov.in_progress %}
+<div class="banner warn">
+  <div class="grow">Still waiting on <strong>{{ cov.pending_names }}</strong> for
+  {{ month_label }} — these figures will rise.
+  <a href="/statements?month={{ month }}">Statements</a>.</div>
+</div>
+{%- elif cov and cov.pending and cov.in_progress %}
+<p class="small muted">{{ month_label }} is still running, and
+{{ cov.pending_names }} {{ 'have' if cov.pending|length != 1 else 'has' }} not
+reported all of it yet. <a href="/statements?month={{ month }}">What's in</a>.</p>
+{%- endif %}
+{%- endmacro %}

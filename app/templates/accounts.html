@@ -3,7 +3,10 @@
 {% block content %}
 
 <h1>Accounts</h1>
-<p class="small muted">One entry per real bank account or card you'll import statements from.</p>
+<p class="small muted">One entry per real bank account or card you'll import
+statements from. <a href="/statements">Which months have arrived</a> tracks what
+each one has reported; an account you archive here is treated as closed and is
+never counted as missing a statement.</p>
 
 {% if message %}<div class="msg-box">{{ message }}</div>{% endif %}
 {% if error %}<div class="error-box">{{ error }}</div>{% endif %}

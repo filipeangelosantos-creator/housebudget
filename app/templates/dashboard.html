@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% from "_macros.html" import amount, plain with context %}
+{% from "_macros.html" import amount, plain, coverage_note with context %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 
@@ -8,6 +8,8 @@
   <span class="label">{{ month_label }}</span>
   <a href="/?month={{ next_month }}" aria-label="Next month">›</a>
 </div>
+
+{{ coverage_note(cov, month, month_label) }}
 
 {% if not has_any_txn %}
 <div class="card">

@@ -4,7 +4,8 @@ import re
 from fastapi import APIRouter, Depends, Request
 
 from ..deps import current_user, get_conn, render
-from ..services import budgets, insights, review, splits as splits_svc, transfers
+from ..services import (budgets, coverage, insights, review,
+                        splits as splits_svc, transfers)
 
 router = APIRouter()
 
@@ -48,4 +49,5 @@ def dashboard(request: Request, conn=Depends(get_conn),
         to_confirm=splits_svc.pending_confirmation_count(conn),
         transfer_suggestions=transfers.suggestion_count(conn),
         future_dated=review.future_dated(conn),
-        income=insights.expected_income(conn, m))
+        income=insights.expected_income(conn, m),
+        cov=coverage.for_month(conn, m))

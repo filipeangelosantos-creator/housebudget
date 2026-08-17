@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from . import config
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 SCHEMA = """
 CREATE TABLE users (
@@ -213,6 +213,22 @@ CREATE TABLE commitments (
     note         TEXT NOT NULL DEFAULT '',
     created_at   TEXT NOT NULL
 );
+
+-- Whether a month's statement for one account has actually arrived.
+--
+-- Statements lag, so for the first half of any month the figures are a partial
+-- picture that reads exactly like an underspend. The app can guess from the
+-- dates it holds, but only you know whether the statement you imported was the
+-- last one coming — 'closed' says it was, 'waiting' overrules a guess that
+-- looks complete but isn't. No row at all means "let the dates speak".
+CREATE TABLE statement_months (
+    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    month      TEXT NOT NULL,                  -- 'YYYY-MM'
+    state      TEXT NOT NULL CHECK (state IN ('closed','waiting')),
+    note       TEXT NOT NULL DEFAULT '',
+    marked_at  TEXT NOT NULL,
+    PRIMARY KEY (account_id, month)
+);
 """
 
 # Future schema changes: append (version, sql) pairs; each runs once in order.
@@ -331,6 +347,16 @@ MIGRATIONS: list[tuple[int, str]] = [
         due_date     TEXT NOT NULL,
         note         TEXT NOT NULL DEFAULT '',
         created_at   TEXT NOT NULL
+    );
+    """),
+    (10, """
+    CREATE TABLE IF NOT EXISTS statement_months (
+        account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+        month      TEXT NOT NULL,
+        state      TEXT NOT NULL CHECK (state IN ('closed','waiting')),
+        note       TEXT NOT NULL DEFAULT '',
+        marked_at  TEXT NOT NULL,
+        PRIMARY KEY (account_id, month)
     );
     """),
 ]

@@ -88,6 +88,14 @@ def merge_accounts(conn, source_id: int, target_id: int) -> dict:
         (source_id, target_id))
     conn.execute("UPDATE import_profiles SET account_id = ? WHERE account_id = ?",
                  (target_id, source_id))
+    # Statement marks likewise: a month the target has already answered for
+    # keeps its own answer, since the merged rows are now part of it.
+    conn.execute(
+        "DELETE FROM statement_months WHERE account_id = ? AND month IN "
+        "(SELECT month FROM statement_months WHERE account_id = ?)",
+        (source_id, target_id))
+    conn.execute("UPDATE statement_months SET account_id = ? WHERE account_id = ?",
+                 (target_id, source_id))
     conn.execute("DELETE FROM accounts WHERE id = ?", (source_id,))
     conn.commit()
     return {"moved": moved, "duplicates_removed": duplicates}
